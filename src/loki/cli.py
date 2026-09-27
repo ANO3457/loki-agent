@@ -1,5 +1,8 @@
 from enum import Enum
+from pathlib import Path
+from typing import Optional
 import typer
+import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
@@ -79,10 +82,21 @@ def init(
         )
     )
 
+def load_loki_config() -> dict:
+    """Reads project configuration from .loki/config.yaml if available."""
+    config_file = Path(".loki/config.yaml")
+    if config_file.exists():
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            pass
+    return {}
+
 @app.command()
 def run(
-    url: str = typer.Argument(..., help="The target URL to test and stress"),
-    duration: int = typer.Option(5, "--duration", "-d", help="Execution duration in seconds"),
+    url: Optional[str] = typer.Argument(None, help="The target URL to test (defaults to .loki/config.yaml if omitted)"),
+    duration: Optional[int] = typer.Option(None, "--duration", "-d", help="Execution duration in seconds"),
     headed: bool = typer.Option(False, "--headed", help="Run browser in visible mode (default is headless)"),
     persona: PersonaChoice = typer.Option(
         PersonaChoice.RAGE_CLICKER,
@@ -92,32 +106,35 @@ def run(
     ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
+    # 1. Resolve configuration from .loki/config.yaml
+    config = load_loki_config()
+    target_config = config.get("target", {})
+    resolved_url = url or target_config.get("default_url")
+    if not resolved_url:
+        console.print("[bold red]Error:[/bold red] No target URL provided and no default found in .loki/config.yaml.")
+        console.print("Run [bold cyan]python -m src.loki.cli init[/bold cyan] first, or pass a URL: [bold green]loki run <url>[/bold green]")
+        raise typer.Exit(code=1)
+    resolved_duration = duration if duration is not None else target_config.get("timeout_seconds", 5)
     active_persona = None
     if persona == PersonaChoice.RAGE_CLICKER:
         active_persona = RageClickerPersona()
-
     persona_label = active_persona.name if active_persona else "Passive Observer"
-    console.print(f"[bold cyan]⚡ Target URL:[/bold cyan] {url}")
+    console.print(f"[bold cyan]⚡ Target URL:[/bold cyan] {resolved_url}")
     console.print(f"[bold magenta]🎭 Active Persona:[/bold magenta] {persona_label}")
-
     sandbox = ChaosSandbox(headless=not headed)
-
     with Status(f"[bold yellow]Unleashing {persona_label}...[/bold yellow]", console=console):
         report = sandbox.run_session(
-            target_url=url,
-            duration=duration,
+            target_url=resolved_url,
+            duration=resolved_duration,
             persona=active_persona,
         )
-
     console.print(f"\n[bold green]✔ Attack session finished in {report.duration_seconds}s[/bold green]")
-
     if report.actions_taken:
         console.print(f"\n[bold blue]📋 Actions executed ({len(report.actions_taken)}):[/bold blue]")
         for action in report.actions_taken[:5]:
             console.print(f"  [dim]•[/dim] {action}")
         if len(report.actions_taken) > 5:
             console.print(f"  [dim]... and {len(report.actions_taken) - 5} more actions.[/dim]")
-
     if report.has_crashes:
         console.print("\n[bold red]💥 CRASHES DETECTED![/bold red]")
         unique_crashes = list(set(report.crashes))
@@ -125,7 +142,6 @@ def run(
             console.print(f"  [red]• Unhandled error:[/red] {crash}")
         for http_err in report.http_errors:
             console.print(f"  [red]• HTTP failure:[/red] {http_err}")
-
         reporter = IncidentReporter()
         run_dir = reporter.save_incident(report)
         if run_dir:
@@ -144,7 +160,6 @@ def run(
             )
     else:
         console.print("\n[bold green]🛡️ No unhandled crashes detected during this run.[/bold green]")
-
     if report.console_errors:
         console.print(f"\n[bold yellow]⚠ Console Warnings/Errors logged: {len(report.console_errors)}[/bold yellow]")
 
