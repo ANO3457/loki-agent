@@ -4,6 +4,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
 from src.loki.engine.sandbox import ChaosSandbox
+from src.loki.engine.reporter import IncidentReporter
 from src.loki.personas.rage_clicker import RageClickerPersona
 
 console = Console()
@@ -77,9 +78,6 @@ def run(
 
     console.print(f"\n[bold green]✔ Attack session finished in {report.duration_seconds}s[/bold green]")
 
-    if report.video_path:
-        console.print(f"📹 [dim]Video recorded to:[/dim] [cyan]{report.video_path}[/cyan]")
-
     if report.actions_taken:
         console.print(f"\n[bold blue]📋 Actions executed ({len(report.actions_taken)}):[/bold blue]")
         for action in report.actions_taken[:5]:
@@ -89,10 +87,29 @@ def run(
 
     if report.has_crashes:
         console.print("\n[bold red]💥 CRASHES DETECTED![/bold red]")
-        for crash in report.crashes:
+        unique_crashes = list(set(report.crashes))
+        for crash in unique_crashes:
             console.print(f"  [red]• Unhandled error:[/red] {crash}")
         for http_err in report.http_errors:
             console.print(f"  [red]• HTTP failure:[/red] {http_err}")
+
+        # Save all evidence into a dedicated run folder
+        reporter = IncidentReporter()
+        run_dir = reporter.save_incident(report)
+        if run_dir:
+            console.print(
+                Panel(
+                    f"[bold white]Incident artifacts packaged successfully:[/bold white]\n\n"
+                    f"📁 [cyan]Directory:[/cyan] {run_dir}\n"
+                    f"📹 [cyan]Video:[/cyan] {run_dir}/replay.webm\n"
+                    f"📜 [cyan]Metadata:[/cyan] {run_dir}/incident.json\n"
+                    f"⚡ [cyan]Repro test:[/cyan] {run_dir}/repro_test.py\n\n"
+                    f"[bold yellow]To reproduce this crash deterministically run:[/bold yellow]\n"
+                    f"[bold green]python {run_dir}/repro_test.py[/bold green]",
+                    title="[bold red]📦 Evidence Captured[/bold red]",
+                    border_style="red",
+                )
+            )
     else:
         console.print("\n[bold green]🛡️ No unhandled crashes detected during this run.[/bold green]")
 
