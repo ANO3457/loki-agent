@@ -10,6 +10,7 @@ from src.loki.engine.sandbox import ChaosSandbox
 from src.loki.engine.reporter import IncidentReporter
 from src.loki.engine.scanner import ProjectScanner
 from src.loki.personas.rage_clicker import RageClickerPersona
+from src.loki.ai.brain import AIBrain
 
 console = Console()
 app = typer.Typer(
@@ -162,6 +163,28 @@ def run(
         console.print("\n[bold green]🛡️ No unhandled crashes detected during this run.[/bold green]")
     if report.console_errors:
         console.print(f"\n[bold yellow]⚠ Console Warnings/Errors logged: {len(report.console_errors)}[/bold yellow]")
+
+@app.command()
+def fix(
+    run_id: Optional[str] = typer.Argument(None, help="Specific run ID to diagnose (defaults to latest incident)"),
+    model: str = typer.Option("gemini/gemini-flash-latest", "--model", "-m", help="AI model to query via LiteLLM"),
+):
+    """Analyze a captured crash with AI reasoning and generate an automated fix."""
+    brain = AIBrain()
+    
+    with Status("[bold yellow]LOKI AI Brain is analyzing crash evidence...[/bold yellow]", console=console):
+        result = brain.diagnose_and_fix(run_id=run_id, model=model)
+    if "error" in result and not result.get("diagnosis"):
+        console.print(f"[bold red]Error:[/bold red] {result['error']}")
+        raise typer.Exit(code=1)
+    run_name = result.get("run_id", "Unknown Run")
+    console.print(
+        Panel(
+            result["diagnosis"],
+            title=f"[bold green]🧠 LOKI AI Diagnosis for {run_name}[/bold green]",
+            border_style="green",
+        )
+    )
 
 if __name__ == "__main__":
     app()

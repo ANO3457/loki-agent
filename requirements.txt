@@ -3,3 +3,4 @@ rich>=13.7.0
 shellingham>=1.5.4
 playwright>=1.45.0
 pyyaml>=6.0.1
+litellm>=1.40.0

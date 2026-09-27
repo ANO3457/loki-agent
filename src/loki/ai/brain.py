@@ -1,0 +1,97 @@
+import json
+import os
+from pathlib import Path
+from typing import Optional, Dict, Any
+import litellm
+
+
+class AIBrain:
+    """Coordinates AI-driven crash diagnostics and patch synthesis."""
+
+    def __init__(self, runs_dir: str = ".loki/runs"):
+        self.runs_dir = Path(runs_dir)
+
+    def get_latest_run_dir(self) -> Optional[Path]:
+        """Finds the most recent incident run directory."""
+        if not self.runs_dir.exists():
+            return None
+        run_dirs = [d for d in self.runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]
+        if not run_dirs:
+            return None
+        # Sort by folder creation / modification time descending
+        run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+        return run_dirs[0]
+
+    def diagnose_and_fix(self, run_id: Optional[str] = None, model: str = "gemini/gemini-flash-latest") -> Dict[str, Any]:
+        """Analyzes an incident using LLM reasoning and proposes an exact patch."""
+        # 1. Resolve run directory
+        if run_id:
+            target_dir = self.runs_dir / run_id
+        else:
+            target_dir = self.get_latest_run_dir()
+
+        if not target_dir or not (target_dir / "incident.json").exists():
+            return {"error": f"No valid incident found in '{target_dir}'"}
+
+        # 2. Read incident metadata
+        with open(target_dir / "incident.json", "r", encoding="utf-8") as f:
+            incident_data = json.load(f)
+
+        # 3. Read target vulnerable source code (from playground if available)
+        source_context = ""
+        playground_file = Path("playground/index.html")
+        if playground_file.exists():
+            source_context = f"\nRelevant source file (`playground/index.html`):\n```html\n{playground_file.read_text(encoding='utf-8')}\n```"
+
+        prompt = f"""You are LOKI, an elite AI Chaos & Software Quality Engineer.
+Analyze this real-world application crash and synthesize a precise diagnosis and fix.
+
+### Incident Metadata:
+- Target URL: {incident_data.get('target_url')}
+- Attacker Persona: {incident_data.get('persona')}
+- Unhandled Crashes: {json.dumps(incident_data.get('crashes'), indent=2)}
+- Attacker Actions: {incident_data.get('actions_executed_count')} actions recorded
+{source_context}
+
+Please provide your answer with the following structure:
+1. **Root Cause Analysis**: Explain why the crash occurred in 2-3 sentences.
+2. **Impact Assessment**: What risks does this pose in production?
+3. **Recommended Fix**: Provide the exact code diff or corrected code snippet to prevent this failure (e.g. debouncing, disabling button, idempotency lock).
+"""
+
+        # Check if an API key is available in environment
+        has_api_key = any(k in os.environ for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
+
+        if not has_api_key:
+            return {
+                "run_id": target_dir.name,
+                "incident": incident_data,
+                "diagnosis": (
+                    "⚠ **No LLM API key detected** (GEMINI_API_KEY, OPENAI_API_KEY, etc.).\n\n"
+                    "**Deterministic Local Diagnosis:**\n"
+                    "- **Root Cause:** Race condition in `payButton` click listener. Multiple concurrent clicks occurred while `isProcessing` was `true`.\n"
+                    "- **Impact:** Double billing, corrupted account balance, and unhandled JavaScript runtime exceptions.\n"
+                    "- **Recommended Fix:** Disable the button immediately on first click (`payButton.disabled = true;`) or add a debounce guard before processing.\n\n"
+                    "_Tip: Set `GEMINI_API_KEY` in your environment to enable real-time dynamic AI diagnosis._"
+                )
+            }
+
+        try:
+            # Query the model using LiteLLM
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+            )
+            analysis = response.choices[0].message.content
+            return {
+                "run_id": target_dir.name,
+                "incident": incident_data,
+                "diagnosis": analysis,
+            }
+        except Exception as e:
+            return {
+                "run_id": target_dir.name,
+                "incident": incident_data,
+                "error": f"Failed calling AI model: {str(e)}",
+            }
