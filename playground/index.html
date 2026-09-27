@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LOKI Chaos Playground — Vulnerable Checkout</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+            width: 420px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        .badge {
+            background-color: #f8514926;
+            color: #f85149;
+            border: 1px solid #f8514940;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            display: inline-block;
+            margin-bottom: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            color: #f0f6fc;
+            margin-bottom: 8px;
+        }
+        p {
+            font-size: 14px;
+            color: #8b949e;
+            margin-bottom: 24px;
+        }
+        .price {
+            font-size: 28px;
+            font-weight: bold;
+            color: #58a6ff;
+            margin-bottom: 24px;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background-color: #238636;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        button:hover {
+            background-color: #2ea043;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            text-align: center;
+            display: none;
+        }
+        .status.processing {
+            display: block;
+            background-color: #1f6feb26;
+            color: #58a6ff;
+            border: 1px solid #1f6feb40;
+        }
+        .status.success {
+            display: block;
+            background-color: #23863626;
+            color: #3fb950;
+            border: 1px solid #23863640;
+        }
+        .status.crash {
+            display: block;
+            background-color: #f8514926;
+            color: #f85149;
+            border: 1px solid #f8514940;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <span class="badge">Vulnerable to Race Conditions</span>
+        <h1>Neural Interface Pro V2</h1>
+        <p>Target test product with an unhandled concurrent click vulnerability.</p>
+        
+        <div class="price">$499.00 USD</div>
+
+        <button id="pay-button" type="button">Confirm & Pay ($499.00)</button>
+
+        <div id="status-box" class="status"></div>
+    </div>
+
+    <script>
+        // Intentional real-world software vulnerability:
+        // Missing debounce lock and backend transaction idempotency
+        let isProcessing = false;
+        const payButton = document.getElementById("pay-button");
+        const statusBox = document.getElementById("status-box");
+
+        payButton.addEventListener("click", () => {
+            if (isProcessing) {
+                // FATAL UNCAUGHT JAVASCRIPT EXCEPTION:
+                statusBox.textContent = "CRITICAL: Race condition! Double transaction triggered.";
+                statusBox.className = "status crash";
+                throw new Error("CRITICAL_PAYMENT_RACE_CONDITION: Concurrent transaction detected! Account balance corrupted without debounce lock.");
+            }
+
+            isProcessing = true;
+            statusBox.textContent = "Processing payment with gateway...";
+            statusBox.className = "status processing";
+
+            // Simulates an 800ms asynchronous network transaction
+            setTimeout(() => {
+                isProcessing = false;
+                statusBox.textContent = "Payment completed successfully!";
+                statusBox.className = "status success";
+            }, 800);
+        });
+    </script>
+</body>
+</html>
