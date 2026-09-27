@@ -1,0 +1,106 @@
+{
+  "name": "checkout_flow",
+  "recorded_at": "2026-09-27T20:47:08.940809",
+  "start_url": "http://localhost:8000",
+  "total_steps": 14,
+  "steps": [
+    {
+      "step": 1,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552811.0
+    },
+    {
+      "step": 2,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552812.95
+    },
+    {
+      "step": 3,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552814.087
+    },
+    {
+      "step": 4,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552817.719
+    },
+    {
+      "step": 5,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552819.094
+    },
+    {
+      "step": 6,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552820.511
+    },
+    {
+      "step": 7,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552821.535
+    },
+    {
+      "step": 8,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552822.511
+    },
+    {
+      "step": 9,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552823.391
+    },
+    {
+      "step": 10,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552824.351
+    },
+    {
+      "step": 11,
+      "action": "click",
+      "selector": "div.card",
+      "value": "PROTECTED WITH DEBOUNCE LOCK\nNeural Interface Pro V2\n\nTarget test product with an unhandled concurrent click vulnerability.\n\n$499.00 USD\nConfirm & Pay ($499.00)\nPayment completed successfully!",
+      "timestamp": 1790552825.775
+    },
+    {
+      "step": 12,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552825.943
+    },
+    {
+      "step": 13,
+      "action": "click",
+      "selector": "div.card",
+      "value": "PROTECTED WITH DEBOUNCE LOCK\nNeural Interface Pro V2\n\nTarget test product with an unhandled concurrent click vulnerability.\n\n$499.00 USD\nConfirm & Pay ($499.00)\nPayment completed successfully!",
+      "timestamp": 1790552826.871
+    },
+    {
+      "step": 14,
+      "action": "click",
+      "selector": "#pay-button",
+      "value": "Confirm & Pay ($499.00)",
+      "timestamp": 1790552827.038
+    }
+  ]
+}

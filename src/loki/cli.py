@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 import typer
 import yaml
+import json
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
@@ -11,6 +12,7 @@ from src.loki.engine.reporter import IncidentReporter
 from src.loki.engine.scanner import ProjectScanner
 from src.loki.personas.rage_clicker import RageClickerPersona
 from src.loki.ai.brain import AIBrain
+from src.loki.engine.recorder import JourneyRecorder
 
 console = Console()
 app = typer.Typer(
@@ -185,6 +187,51 @@ def fix(
             border_style="green",
         )
     )
+
+@app.command()
+def record(
+    name: str = typer.Argument("checkout_flow", help="Descriptive identifier for this user journey"),
+    url: Optional[str] = typer.Option(None, "--url", "-u", help="Target URL (defaults to .loki/config.yaml if omitted)"),
+):
+    """Interactively record a human user journey and save it as a test blueprint."""
+    config = load_loki_config()
+    target_config = config.get("target", {})
+    resolved_url = url or target_config.get("default_url")
+
+    if not resolved_url:
+        console.print("[bold red]Error:[/bold red] No target URL found in .loki/config.yaml or provided as option.")
+        raise typer.Exit(code=1)
+
+    console.print(
+        Panel(
+            f"[bold white]Starting interactive recording session...[/bold white]\n\n"
+            f"🌐 [cyan]URL:[/cyan] {resolved_url}\n"
+            f"📝 [cyan]Journey Name:[/cyan] {name}\n\n"
+            f"[dim]• Perform your test flow naturally in the browser window.[/dim]\n"
+            f"[dim]• Passwords and secrets will be masked automatically.[/dim]\n"
+            f"[bold yellow]• When finished, simply close the browser window.[/bold yellow]",
+            title="[bold cyan]🎥 LOKI Flow Recorder[/bold cyan]",
+            border_style="cyan",
+        )
+    )
+
+    recorder = JourneyRecorder()
+    journey_path = recorder.record_journey(start_url=resolved_url, journey_name=name)
+
+    # Read recorded journey summary
+    with open(journey_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    steps_count = data.get("total_steps", 0)
+    console.print(f"\n[bold green]✔ Recording complete! Captured {steps_count} user actions.[/bold green]")
+    console.print(f"📁 [cyan]Blueprint saved to:[/cyan] [bold]{journey_path}[/bold]\n")
+
+    if data.get("steps"):
+        console.print("[bold blue]Recorded Steps Summary:[/bold blue]")
+        for s in data["steps"][:5]:
+            console.print(f"  [dim]{s['step']}.[/dim] [green]{s['action']}[/green] on [cyan]{s['selector']}[/cyan] [dim]({s['value']})[/dim]")
+        if steps_count > 5:
+            console.print(f"  [dim]... and {steps_count - 5} more steps.[/dim]")
 
 if __name__ == "__main__":
     app()
