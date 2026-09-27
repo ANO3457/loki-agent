@@ -46,7 +46,7 @@ class RageClickerPersona(BasePersona):
                     self.log_action(f"Targeting element: '{element_text}' with {self.click_burst_count} rapid clicks")
 
                     for _ in range(self.click_burst_count):
-                        element.click(timeout=1000, no_wait_after=True)
+                        element.click(timeout=300, no_wait_after=True, force=True)
                         time.sleep(self.click_delay)
 
                 except TimeoutError:
@@ -57,3 +57,24 @@ class RageClickerPersona(BasePersona):
                 time.sleep(0.3)
 
         self.log_action("Finished RageClicker attack session")
+
+    def attack_step(self, page: Page, step: dict):
+        """Assaults a specific recorded element from a journey with click bursts."""
+        selector = step.get("selector")
+        if not selector:
+            return
+
+        action = step.get("action")
+        label = step.get("value") or selector
+
+        if action == "click":
+            try:
+                # Wait briefly for element to be attached/visible
+                elem = page.wait_for_selector(selector, timeout=1000)
+                if elem:
+                    self.log_action(f"Guided burst assault on '{label}' ({selector}) with {self.click_burst_count} clicks")
+                    for _ in range(self.click_burst_count):
+                        elem.click(timeout=300, no_wait_after=True, force=True)
+                        time.sleep(self.click_delay)
+            except Exception as e:
+                self.log_action(f"Guided click assault on {selector} skipped: {str(e)}")

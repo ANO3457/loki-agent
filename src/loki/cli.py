@@ -118,30 +118,62 @@ def run(
         "-p",
         help="Synthetic chaos persona to simulate (rage-clicker or none)",
     ),
+    journey: Optional[str] = typer.Option(
+        None,
+        "--journey",
+        "-j",
+        help="Recorded journey blueprint name (from .loki/journeys/) to guide the chaos attack",
+    ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
-    # 1. Resolve configuration from .loki/config.yaml
+    # 1. Load journey blueprint if specified
+    journey_data = None
+    if journey:
+        journey_path = Path(f".loki/journeys/{journey}.json" if not journey.endswith(".json") else f".loki/journeys/{journey}")
+        if not journey_path.exists():
+            journey_path = Path(journey)
+        if not journey_path.exists():
+            console.print(f"[bold red]Error:[/bold red] Journey blueprint '{journey}' not found in .loki/journeys/")
+            raise typer.Exit(code=1)
+        try:
+            with open(journey_path, "r", encoding="utf-8") as f:
+                journey_data = json.load(f)
+        except Exception as e:
+            console.print(f"[bold red]Error reading journey blueprint:[/bold red] {e}")
+            raise typer.Exit(code=1)
+
+    # 2. Resolve configuration from .loki/config.yaml or journey
     config = load_loki_config()
     target_config = config.get("target", {})
-    resolved_url = url or target_config.get("default_url")
+    resolved_url = url or (journey_data.get("start_url") if journey_data else None) or target_config.get("default_url")
     if not resolved_url:
         console.print("[bold red]Error:[/bold red] No target URL provided and no default found in .loki/config.yaml.")
         console.print("Run [bold cyan]python -m src.loki.cli init[/bold cyan] first, or pass a URL: [bold green]loki run <url>[/bold green]")
         raise typer.Exit(code=1)
+
     resolved_duration = duration if duration is not None else target_config.get("timeout_seconds", 5)
+
     active_persona = None
     if persona == PersonaChoice.RAGE_CLICKER:
         active_persona = RageClickerPersona()
+
     persona_label = active_persona.name if active_persona else "Passive Observer"
     console.print(f"[bold cyan]⚡ Target URL:[/bold cyan] {resolved_url}")
+    if journey_data:
+        console.print(f"[bold blue]🗺️ Guided Journey:[/bold blue] {journey_data.get('name')} ({journey_data.get('total_steps')} steps)")
     console.print(f"[bold magenta]🎭 Active Persona:[/bold magenta] {persona_label}")
+
     sandbox = ChaosSandbox(headless=not headed)
-    with Status(f"[bold yellow]Unleashing {persona_label}...[/bold yellow]", console=console):
+
+    status_msg = f"Executing guided chaos assault on {journey_data.get('name')}..." if journey_data else f"Unleashing {persona_label}..."
+    with Status(f"[bold yellow]{status_msg}[/bold yellow]", console=console):
         report = sandbox.run_session(
             target_url=resolved_url,
             duration=resolved_duration,
             persona=active_persona,
+            journey_data=journey_data,
         )
+
     console.print(f"\n[bold green]✔ Attack session finished in {report.duration_seconds}s[/bold green]")
     if report.actions_taken:
         console.print(f"\n[bold blue]📋 Actions executed ({len(report.actions_taken)}):[/bold blue]")

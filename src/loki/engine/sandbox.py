@@ -37,6 +37,7 @@ class ChaosSandbox:
         target_url: str,
         duration: int = 5,
         persona: Optional[BasePersona] = None,
+        journey_data: Optional[dict] = None,
     ) -> IncidentReport:
         """Launches the target URL, applies chaotic attacks, and records evidence."""
         report = IncidentReport(
@@ -76,8 +77,23 @@ class ChaosSandbox:
             try:
                 page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
 
-                # If a persona is provided, unleash the chaotic attack
-                if persona:
+                # Guided journey execution
+                if journey_data and journey_data.get("steps"):
+                    report.actions_taken.append(f"Started guided journey: '{journey_data.get('name')}'")
+                    for step in journey_data["steps"]:
+                        if persona:
+                            persona.attack_step(page=page, step=step)
+                        else:
+                            selector = step.get("selector")
+                            if step.get("action") == "click" and selector:
+                                page.click(selector, timeout=2000)
+                            elif step.get("action") == "input" and selector:
+                                page.fill(selector, step.get("value", ""))
+                        time.sleep(0.2)
+
+                    if persona:
+                        report.actions_taken.extend(persona.actions_log)
+                elif persona:
                     persona.attack(page=page, duration=duration)
                     report.actions_taken = persona.actions_log
                 else:

@@ -19,3 +19,7 @@ class BasePersona(ABC):
     def attack(self, page: Page, duration: int):
         """Executes the chaotic behavioral pattern on the target page."""
         pass
+
+    def attack_step(self, page: Page, step: dict):
+        """Applies persona-specific chaos on a specific recorded journey step."""
+        pass
