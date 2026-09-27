@@ -1,0 +1,31 @@
+# Python virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# LOKI local runs, videos, and evidence (keep local)
+.loki/runs/
+.loki/knowledge.json
+
+# Environment secrets and keys
+.env
+*.env.local
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
+
+# Others
+SPECIFICATION.md
