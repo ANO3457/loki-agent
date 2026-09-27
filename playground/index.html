@@ -102,7 +102,7 @@
 <body>
 
     <div class="card">
-        <span class="badge">Vulnerable to Race Conditions</span>
+        <span class="badge" style="background-color: #23863626; color: #3fb950; border-color: #23863640;">Protected with Debounce Lock</span>
         <h1>Neural Interface Pro V2</h1>
         <p>Target test product with an unhandled concurrent click vulnerability.</p>
         
@@ -114,27 +114,34 @@
     </div>
 
     <script>
-        // Intentional real-world software vulnerability:
-        // Missing debounce lock and backend transaction idempotency
+        // Patched with LOKI AI Recommended Fix:
+        // Immediate client-side UI lockout & debounce guard
         let isProcessing = false;
         const payButton = document.getElementById("pay-button");
         const statusBox = document.getElementById("status-box");
 
         payButton.addEventListener("click", () => {
+            // Guard against duplicate invocations
             if (isProcessing) {
-                // FATAL UNCAUGHT JAVASCRIPT EXCEPTION:
-                statusBox.textContent = "CRITICAL: Race condition! Double transaction triggered.";
-                statusBox.className = "status crash";
-                throw new Error("CRITICAL_PAYMENT_RACE_CONDITION: Concurrent transaction detected! Account balance corrupted without debounce lock.");
+                return;
             }
 
+            // Lock execution and disable UI interactions immediately
             isProcessing = true;
+            payButton.disabled = true;
+            payButton.style.opacity = "0.6";
+            payButton.style.cursor = "not-allowed";
+
             statusBox.textContent = "Processing payment with gateway...";
             statusBox.className = "status processing";
 
             // Simulates an 800ms asynchronous network transaction
             setTimeout(() => {
                 isProcessing = false;
+                payButton.disabled = false;
+                payButton.style.opacity = "1";
+                payButton.style.cursor = "pointer";
+
                 statusBox.textContent = "Payment completed successfully!";
                 statusBox.className = "status success";
             }, 800);
