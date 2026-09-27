@@ -5,6 +5,7 @@ from rich.panel import Panel
 from rich.status import Status
 from src.loki.engine.sandbox import ChaosSandbox
 from src.loki.engine.reporter import IncidentReporter
+from src.loki.engine.scanner import ProjectScanner
 from src.loki.personas.rage_clicker import RageClickerPersona
 
 console = Console()
@@ -45,6 +46,38 @@ def main(ctx: typer.Context):
 def version():
     """Display the installed version of Loki."""
     console.print("[bold yellow]LOKI Agent[/bold yellow] version [bold green]0.1.0[/bold green]")
+
+@app.command()
+def init(
+    target_url: str = typer.Option("http://localhost:8000", "--url", "-u", help="Default target URL for this repository"),
+):
+    """Scan the repository and initialize LOKI configuration and business rules."""
+    console.print("[bold cyan]⚡ Initializing LOKI Agent in current workspace...[/bold cyan]\n")
+
+    scanner = ProjectScanner()
+
+    with Status("[bold yellow]Scanning codebase fingerprint and stack...[/bold yellow]", console=console):
+        stack_info = scanner.detect_stack()
+        paths = scanner.initialize(default_target_url=target_url)
+
+    languages = ", ".join(stack_info["languages"]) or "Generic / Polyglot"
+    files = ", ".join(stack_info["detected_files"]) or "None"
+
+    console.print(
+        Panel(
+            f"[bold green]✔ LOKI successfully initialized in this repository![/bold green]\n\n"
+            f"[bold white]Detected Stack:[/bold white] [cyan]{languages}[/cyan]\n"
+            f"[bold white]Signature Files:[/bold white] [dim]{files}[/dim]\n\n"
+            f"[bold white]Generated Configuration Artifacts:[/bold white]\n"
+            f"  ⚙ [cyan]{paths['config']}[/cyan] [dim](<Project & timeout configuration>)[/dim]\n"
+            f"  📜 [cyan]{paths['rules']}[/cyan] [dim](<Plain English business rules>)[/dim]\n"
+            f"  🧬 [cyan]{paths['knowledge']}[/cyan] [dim](<Detected architectural fingerprint>)[/dim]\n\n"
+            f"[bold yellow]Next Step:[/bold yellow] Edit [bold cyan].loki/rules.md[/bold cyan] to add your custom business constraints, "
+            f"or run [bold green]python -m src.loki.cli run {target_url}[/bold green] to launch an attack.",
+            title="[bold green]🚀 Workspace Initialized[/bold green]",
+            border_style="green",
+        )
+    )
 
 @app.command()
 def run(
@@ -93,7 +126,6 @@ def run(
         for http_err in report.http_errors:
             console.print(f"  [red]• HTTP failure:[/red] {http_err}")
 
-        # Save all evidence into a dedicated run folder
         reporter = IncidentReporter()
         run_dir = reporter.save_incident(report)
         if run_dir:

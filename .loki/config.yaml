@@ -1,0 +1,11 @@
+version: '1.0'
+target:
+  default_url: http://localhost:8000
+  timeout_seconds: 10
+  headless: true
+chaos:
+  default_persona: rage-clicker
+  click_burst_count: 5
+ai:
+  provider: gemini
+  model: gemini-2.5-flash
