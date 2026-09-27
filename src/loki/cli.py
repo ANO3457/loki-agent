@@ -1,9 +1,19 @@
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+import sys
 import typer
 import yaml
 import json
+
+# Ensure standard output streams support UTF-8 on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
@@ -13,6 +23,7 @@ from src.loki.engine.scanner import ProjectScanner
 from src.loki.personas.rage_clicker import RageClickerPersona
 from src.loki.ai.brain import AIBrain
 from src.loki.engine.recorder import JourneyRecorder
+from src.loki.engine.replayer import IncidentReplayer
 
 console = Console()
 app = typer.Typer(
@@ -232,6 +243,49 @@ def record(
             console.print(f"  [dim]{s['step']}.[/dim] [green]{s['action']}[/green] on [cyan]{s['selector']}[/cyan] [dim]({s['value']})[/dim]")
         if steps_count > 5:
             console.print(f"  [dim]... and {steps_count - 5} more steps.[/dim]")
+
+@app.command()
+def replay(
+    run_id: Optional[str] = typer.Argument(None, help="Incident run ID to replay (defaults to most recent)"),
+    video: bool = typer.Option(False, "--video", "-v", help="Open the recorded video instead of executing test"),
+):
+    """Replay a captured incident deterministically or open its recorded video."""
+    replayer = IncidentReplayer()
+    run_dir = replayer.get_run_dir(run_id=run_id)
+
+    if not run_dir:
+        console.print(f"[bold red]Error:[/bold red] Incident directory '{run_id or 'latest'}' not found.")
+        console.print("Make sure there are recorded crashes in [bold cyan].loki/runs/[/bold cyan].")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold cyan]⚡ Replaying incident:[/bold cyan] [bold yellow]{run_dir.name}[/bold yellow]")
+
+    # Mode 1: Open recorded video artifact
+    if video:
+        console.print("[dim]Launching video artifact in default player...[/dim]")
+        res = replayer.open_video(run_dir)
+        if res.get("success"):
+            console.print(f"[bold green]✔ Opened video:[/bold green] [cyan]{res['video_path']}[/cyan]")
+        else:
+            console.print(f"[bold red]Error opening video:[/bold red] {res.get('error')}")
+            raise typer.Exit(code=1)
+        return
+
+    # Mode 2: Run deterministic Playwright repro test
+    with Status("[bold yellow]Executing deterministic reproduction script in visible browser...[/bold yellow]", console=console):
+        res = replayer.replay_test(run_dir)
+
+    if not res.get("success"):
+        console.print(f"[bold red]Replay execution failed:[/bold red] {res.get('error')}")
+        raise typer.Exit(code=1)
+
+    if res.get("reproduced"):
+        console.print("\n[bold red]💥 CRASH REPRODUCED DETERMINISTICALLY![/bold red]")
+        console.print(Panel(res.get("stdout", "").strip(), title="[bold red]Reproduction Output[/bold red]", border_style="red"))
+    else:
+        console.print("\n[bold green]🛡️ Crash was NOT reproduced (the underlying bug may be resolved).[/bold green]")
+        if res.get("stdout"):
+            console.print(f"[dim]{res['stdout'].strip()}[/dim]")
 
 if __name__ == "__main__":
     app()
