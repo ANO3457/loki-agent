@@ -3,15 +3,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 from playwright.sync_api import sync_playwright, Page, Response, Error
+from src.loki.personas.base import BasePersona
 
 
 @dataclass
 class IncidentReport:
     """Stores all anomalies and crash data captured during an execution."""
     target_url: str
+    persona_name: Optional[str] = None
     crashes: List[str] = field(default_factory=list)
     console_errors: List[str] = field(default_factory=list)
     http_errors: List[str] = field(default_factory=list)
+    actions_taken: List[str] = field(default_factory=list)
     video_path: Optional[str] = None
     duration_seconds: float = 0.0
 
@@ -29,16 +32,21 @@ class ChaosSandbox:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.headless = headless
 
-    def run_session(self, target_url: str, duration: int = 5) -> IncidentReport:
-        """Launches the target URL, monitors for crashes, and records the session."""
-        report = IncidentReport(target_url=target_url)
+    def run_session(
+        self,
+        target_url: str,
+        duration: int = 5,
+        persona: Optional[BasePersona] = None,
+    ) -> IncidentReport:
+        """Launches the target URL, applies chaotic attacks, and records evidence."""
+        report = IncidentReport(
+            target_url=target_url,
+            persona_name=persona.name if persona else None,
+        )
         start_time = time.time()
 
         with sync_playwright() as p:
-            # Launch isolated Chromium instance
             browser = p.chromium.launch(headless=self.headless)
-
-            # Create an ephemeral browser context with video recording enabled
             context = browser.new_context(
                 record_video_dir=str(self.output_dir / "videos"),
                 record_video_size={"width": 1280, "height": 720},
@@ -66,14 +74,18 @@ class ChaosSandbox:
             page.on("response", handle_response)
 
             try:
-                # Navigate to the target application
-                page.goto(target_url, wait_until="networkidle", timeout=15000)
-                # Keep session active for the given duration
-                time.sleep(duration)
+                page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+
+                # If a persona is provided, unleash the chaotic attack
+                if persona:
+                    persona.attack(page=page, duration=duration)
+                    report.actions_taken = persona.actions_log
+                else:
+                    time.sleep(duration)
+
             except Error as e:
                 report.crashes.append(f"Navigation error: {str(e)}")
             finally:
-                # Close page and context to flush video recording to disk
                 page.close()
                 video_obj = page.video
                 context.close()
