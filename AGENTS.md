@@ -67,7 +67,8 @@ d:/Proyectos/agente-ia/
 │           ├── __init__.py
 │           ├── base.py         # BasePersona abstract base class
 │           ├── rage_clicker.py # RageClickerPersona: Burst clicks & race conditions
-│           └── novice_chaotic.py # NoviceChaoticPersona: Input fuzzing, emojis & erratic keys
+│           ├── novice_chaotic.py # NoviceChaoticPersona: Input fuzzing, emojis & erratic keys
+│           └── network_tormentor.py # NetworkTormentorPersona: Latency throttling & offline drops
 ├── AGENTS.md                   # This instruction manual for AI coding agents
 ├── requirements.txt            # Core dependencies (typer, rich, playwright, pyyaml, litellm)
 └── SPECIFICATION.md            # Product specification and roadmap

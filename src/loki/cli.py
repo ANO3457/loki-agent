@@ -25,6 +25,7 @@ from src.loki.engine.html_reporter import HTMLReporter
 from src.loki.engine.scanner import ProjectScanner
 from src.loki.personas.rage_clicker import RageClickerPersona
 from src.loki.personas.novice_chaotic import NoviceChaoticPersona
+from src.loki.personas.network_tormentor import NetworkTormentorPersona
 from src.loki.ai.brain import AIBrain
 from src.loki.engine.recorder import JourneyRecorder
 from src.loki.engine.replayer import IncidentReplayer
@@ -39,6 +40,7 @@ app = typer.Typer(
 class PersonaChoice(str, Enum):
     RAGE_CLICKER = "rage-clicker"
     NOVICE_CHAOTIC = "novice-chaotic"
+    NETWORK_TORMENTOR = "network-tormentor"
     NONE = "none"
 
 @app.callback(invoke_without_command=True)
@@ -180,6 +182,8 @@ def run(
         active_persona = RageClickerPersona()
     elif persona == PersonaChoice.NOVICE_CHAOTIC:
         active_persona = NoviceChaoticPersona()
+    elif persona == PersonaChoice.NETWORK_TORMENTOR:
+        active_persona = NetworkTormentorPersona()
 
     persona_label = active_persona.name if active_persona else "Passive Observer"
     console.print(f"[bold cyan]⚡ Target URL:[/bold cyan] {resolved_url}")
