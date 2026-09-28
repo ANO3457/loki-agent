@@ -17,6 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
+from rich.table import Table
 from src.loki.engine.sandbox import ChaosSandbox
 from src.loki.engine.reporter import IncidentReporter
 from src.loki.engine.scanner import ProjectScanner
@@ -124,6 +125,12 @@ def run(
         "-j",
         help="Recorded journey blueprint name (from .loki/journeys/) to guide the chaos attack",
     ),
+    rules: bool = typer.Option(
+        True,
+        "--rules/--no-rules",
+        "-r/-nr",
+        help="Evaluate business assertions in .loki/rules.md using AI reasoning",
+    ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
     # 1. Load journey blueprint if specified
@@ -209,10 +216,55 @@ def run(
     if report.console_errors:
         console.print(f"\n[bold yellow]⚠ Console Warnings/Errors logged: {len(report.console_errors)}[/bold yellow]")
 
+    # 4. Business Rules Evaluation via AI
+    rules_file = Path(".loki/rules.md")
+    if rules and rules_file.exists():
+        rules_content = rules_file.read_text(encoding="utf-8")
+        brain = AIBrain()
+        with Status("[bold yellow]Evaluating business assertions against .loki/rules.md with AI...[/bold yellow]", console=console):
+            evaluations = brain.evaluate_business_rules(report=report, rules_content=rules_content)
+
+        if evaluations:
+            table = Table(title="📋 Business Rules Verification Scorecard", border_style="cyan")
+            table.add_column("Business Rule", style="white", ratio=4)
+            table.add_column("Status", justify="center", ratio=2)
+            table.add_column("AI Observation / Evidence", style="dim", ratio=5)
+
+            has_violations = False
+            has_errors = False
+            for item in evaluations:
+                status = item.get("status", "UNKNOWN").upper()
+                if status == "PASSED":
+                    status_text = "[bold green]✔ PASSED[/bold green]"
+                elif status == "VIOLATED":
+                    status_text = "[bold red]❌ VIOLATED[/bold red]"
+                    has_violations = True
+                elif status == "ERROR":
+                    status_text = "[bold red]⚠ ERROR[/bold red]"
+                    has_errors = True
+                elif status == "SKIPPED":
+                    status_text = "[dim]SKIPPED[/dim]"
+                else:
+                    status_text = f"[bold yellow]{status}[/bold yellow]"
+
+                table.add_row(
+                    item.get("rule", "Unnamed Rule"),
+                    status_text,
+                    item.get("observation", "No observation"),
+                )
+
+            console.print("\n", table)
+            if has_violations:
+                console.print("[bold red]⚠ Business rule violations detected during this attack session![/bold red]")
+            elif has_errors:
+                console.print("[bold yellow]⚠ AI rules evaluation encountered an error (check API status).[/bold yellow]")
+            else:
+                console.print("[bold green]✔ All business rules successfully satisfied![/bold green]")
+
 @app.command()
 def fix(
     run_id: Optional[str] = typer.Argument(None, help="Specific run ID to diagnose (defaults to latest incident)"),
-    model: str = typer.Option("gemini/gemini-flash-latest", "--model", "-m", help="AI model to query via LiteLLM"),
+    model: str = typer.Option("gemini/gemini-3.5-flash-lite", "--model", "-m", help="AI model to query via LiteLLM"),
 ):
     """Analyze a captured crash with AI reasoning and generate an automated fix."""
     brain = AIBrain()

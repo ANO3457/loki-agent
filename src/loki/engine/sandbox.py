@@ -16,6 +16,7 @@ class IncidentReport:
     http_errors: List[str] = field(default_factory=list)
     actions_taken: List[str] = field(default_factory=list)
     video_path: Optional[str] = None
+    dom_snapshot: Optional[str] = None
     duration_seconds: float = 0.0
 
     @property
@@ -102,6 +103,32 @@ class ChaosSandbox:
             except Error as e:
                 report.crashes.append(f"Navigation error: {str(e)}")
             finally:
+                # Capture concise UI state snapshot for AI business rules evaluation
+                try:
+                    if not page.is_closed():
+                        dom_info = page.evaluate("""() => {
+                            const elements = [];
+                            document.querySelectorAll('button, input, select, a, .status, .alert, .badge, [role="alert"]').forEach(el => {
+                                elements.push({
+                                    tag: el.tagName.toLowerCase(),
+                                    id: el.id || undefined,
+                                    classes: el.className || undefined,
+                                    text: (el.innerText || el.value || '').trim(),
+                                    disabled: el.disabled !== undefined ? el.disabled : undefined,
+                                    visible: el.offsetParent !== null
+                                });
+                            });
+                            return {
+                                title: document.title,
+                                url: window.location.href,
+                                interactive_elements: elements
+                            };
+                        }""")
+                        import json
+                        report.dom_snapshot = json.dumps(dom_info, indent=2)
+                except Exception:
+                    pass
+
                 page.close()
                 video_obj = page.video
                 context.close()

@@ -1,8 +1,11 @@
 import json
 import os
+import time
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import litellm
+litellm.suppress_debug_info = True
+from src.loki.engine.sandbox import IncidentReport
 
 
 class AIBrain:
@@ -22,7 +25,7 @@ class AIBrain:
         run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
         return run_dirs[0]
 
-    def diagnose_and_fix(self, run_id: Optional[str] = None, model: str = "gemini/gemini-flash-latest") -> Dict[str, Any]:
+    def diagnose_and_fix(self, run_id: Optional[str] = None, model: str = "gemini/gemini-3.5-flash-lite") -> Dict[str, Any]:
         """Analyzes an incident using LLM reasoning and proposes an exact patch."""
         # 1. Resolve run directory
         if run_id:
@@ -95,3 +98,74 @@ Please provide your answer with the following structure:
                 "incident": incident_data,
                 "error": f"Failed calling AI model: {str(e)}",
             }
+
+    def evaluate_business_rules(
+        self,
+        report: IncidentReport,
+        rules_content: str,
+        model: str = "gemini/gemini-3.5-flash-lite",
+    ) -> List[Dict[str, Any]]:
+        """Evaluates plain English business assertions against execution evidence."""
+        prompt = f"""You are LOKI's Autonomous Business Logic Verification Engine.
+Evaluate the following business assertions against the live application behavior recorded during the test session.
+
+### Defined Business Rules:
+{rules_content}
+
+### Execution Evidence:
+- Target URL: {report.target_url}
+- Actions Taken: {json.dumps(report.actions_taken, indent=2)}
+- Unhandled Crashes Detected: {len(report.crashes)}
+- Crash Details: {json.dumps(report.crashes, indent=2)}
+- Final DOM State & Interactive Elements:
+{report.dom_snapshot or "No DOM snapshot available."}
+
+### Evaluation Instructions:
+For each rule or bullet point in the business rules, evaluate if it PASSED or was VIOLATED based on the evidence.
+Respond ONLY with a valid JSON array of objects following this exact schema:
+[
+  {{
+    "rule": "Summary of the business rule",
+    "status": "PASSED" or "VIOLATED",
+    "observation": "Brief explanation citing specific evidence (e.g. element state, exception count, message text)"
+  }}
+]
+"""
+        has_api_key = any(k in os.environ for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
+        if not has_api_key:
+            return [{
+                "rule": "Business Rules Evaluation",
+                "status": "SKIPPED",
+                "observation": "No API key configured in environment."
+            }]
+
+        models_to_try = [model, "gemini/gemini-flash-latest"]
+
+        last_error = "Unknown error"
+        for m in models_to_try:
+            for attempt in range(2):
+                try:
+                    response = litellm.completion(
+                        model=m,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.1,
+                    )
+                    raw = response.choices[0].message.content.strip()
+                    # Clean possible markdown formatting
+                    if raw.startswith("```"):
+                        lines = raw.split("\n")
+                        if lines[0].startswith("```"):
+                            lines = lines[1:]
+                        if lines and lines[-1].startswith("```"):
+                            lines = lines[:-1]
+                        raw = "\n".join(lines).strip()
+                    return json.loads(raw)
+                except Exception as e:
+                    last_error = str(e)
+                    time.sleep(1.0)
+
+        return [{
+            "rule": "Business Rules Evaluation Error",
+            "status": "ERROR",
+            "observation": f"AI model evaluation error: {last_error}"
+        }]
