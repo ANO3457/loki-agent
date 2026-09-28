@@ -96,6 +96,15 @@ Persona: {report.persona_name}
 """
 
 import sys
+
+# Ensure UTF-8 output encoding across Windows and POSIX
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from playwright.sync_api import sync_playwright
 
 def test_reproduce_crash():

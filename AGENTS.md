@@ -66,6 +66,7 @@ d:/Proyectos/agente-ia/
 │       │   ├── scrubber.py     # NetworkScrubber: Sanitizes HAR traces, auth tokens & cookies
 │       │   ├── recorder.py     # JourneyRecorder: Interactive DOM event recorder & secret masking
 │       │   ├── replayer.py     # IncidentReplayer: Deterministic test execution and video player
+│       │   ├── healer.py       # CodeHealer: Autonomous patch synthesizer, backup & verification loop
 │       │   ├── ci.py           # CIGate: CI environment detection, exit codes & GitHub Step Summary
 │       │   └── scanner.py      # ProjectScanner: Tech stack detector for 'loki init'
 │       └── personas/
@@ -107,6 +108,7 @@ python -m src.loki.cli run --journey checkout_flow
 python -m src.loki.cli run -p novice-chaotic --duration 5 --headed
 python -m src.loki.cli run --open       # Automatically open HTML report in browser
 python -m src.loki.cli run --no-rules    # Disable AI business rules evaluation
+python -m src.loki.cli run --auto-heal   # Automatically synthesize, apply & verify code patch on crash
 python -m src.loki.cli run --ci          # Strict CI/CD quality gate (exit code 1 on failures, writes GITHUB_STEP_SUMMARY)
 python -m src.loki.cli run --strict      # Fail with exit code 1 if any crash or rule violation is detected
 
@@ -115,9 +117,11 @@ python -m src.loki.cli report
 python -m src.loki.cli report <run_id>
 python -m src.loki.cli report --no-open
 
-# 5. Diagnose latest crash and generate code patch using AI Brain
+# 5. Diagnose latest crash, synthesize surgical patch and self-heal
 python -m src.loki.cli fix
 python -m src.loki.cli fix <run_id>
+python -m src.loki.cli fix --apply      # Synthesize surgical patch, apply to code & verify with repro test
+python -m src.loki.cli fix -a --yes     # Non-interactive self-healing with verification
 
 # 6. Deterministically replay captured incident or open video
 python -m src.loki.cli replay

@@ -21,6 +21,7 @@ dist/
 # LOKI local runs, videos, and evidence (keep local)
 .loki/runs/
 .loki/knowledge.json
+*.loki.bak
 
 # Environment secrets and keys
 .env

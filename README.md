@@ -63,6 +63,11 @@ At the end of an assault session, LOKI's AI Brain (`gemini-3.5-flash-lite` via L
 * Seamlessly integrates into GitHub Actions, GitLab CI, or pre-commit pipelines (`--ci`, `--strict`).
 * Automatically formats and publishes test summaries to `$GITHUB_STEP_SUMMARY` and enforces deterministic exit codes (`0` on pass, `1` on failure).
 
+### 🚑 8. Autonomous Code Self-Healing (`loki fix --apply` & `loki run --auto-heal`)
+* Synthesizes precise, minimal surgical code patches to permanently eliminate the root cause of crashes.
+* Safely creates automatic backups (`.loki.bak`), applies the patch to your source code, and runs a closed-loop reproduction verification test.
+* If the crash still reproduces, LOKI automatically restores your code safely from backup.
+
 ---
 
 ## 🚀 Quickstart
@@ -135,10 +140,12 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki record --name <flow>` | Interactively record a user journey blueprint with credential masking |
 | `loki run [url]` | Execute chaos attack session against target URL |
 | `loki run --swarm` | Orchestrate all 4 chaos personas in coordinated assault waves |
+| `loki run --auto-heal` | Autonomously synthesize, apply, and verify a code fix on crash |
 | `loki run --journey <name>` | Attack a specific recorded journey blueprint |
 | `loki run --ci` | Run in strict CI/CD mode (exit code 1 on failures, writes Step Summary) |
 | `loki report` | View or generate standalone HTML dashboard for latest or specific run |
 | `loki fix` | Diagnose latest captured crash with AI reasoning and generate code patch |
+| `loki fix --apply` | Synthesize surgical patch, apply to code, and verify with repro test |
 | `loki replay` | Deterministically replay captured incident or open video (`--video`) |
 | `loki chat` | Launch conversational QA terminal assistant REPL |
 
@@ -152,7 +159,8 @@ loki-agent/
 │   └── logo.png                # Official LOKI flat vector brandmark
 ├── .github/
 │   └── workflows/
-│       └── loki.yml            # Automated CI/CD quality gate workflow
+│       ├── loki.yml            # Automated CI/CD quality gate workflow
+│       └── release.yml         # Cross-platform binary compilation & releases
 ├── .loki/                      # Local configuration and captured artifacts
 │   ├── config.yaml             # Target URL, timeouts, model settings
 │   ├── rules.md                # Human-readable business rules evaluated by AI
@@ -180,6 +188,7 @@ loki-agent/
 │       │   ├── scrubber.py     # NetworkScrubber: Sanitizes HAR traces & cookies
 │       │   ├── recorder.py     # JourneyRecorder: Interactive DOM event recorder
 │       │   ├── replayer.py     # IncidentReplayer: Deterministic reproduction
+│       │   ├── healer.py       # CodeHealer: Autonomous patch synthesizer & verification
 │       │   ├── ci.py           # CIGate: CI environment detection & Step Summary
 │       │   └── scanner.py      # ProjectScanner: Tech stack detector
 │       └── personas/

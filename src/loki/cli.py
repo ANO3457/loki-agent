@@ -19,6 +19,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
 from rich.table import Table
+from rich.prompt import Confirm
+from rich.syntax import Syntax
 from src.loki.engine.sandbox import ChaosSandbox
 from src.loki.engine.reporter import IncidentReporter
 from src.loki.engine.html_reporter import HTMLReporter
@@ -33,6 +35,7 @@ from src.loki.ai.chat import LokiChatSession
 from src.loki.engine.recorder import JourneyRecorder
 from src.loki.engine.replayer import IncidentReplayer
 from src.loki.engine.ci import CIGate
+from src.loki.engine.healer import CodeHealer
 
 console = Console()
 app = typer.Typer(
@@ -170,6 +173,12 @@ def run(
         False,
         "--strict",
         help="Fail with exit code 1 if any crash or business rule violation is detected",
+    ),
+    auto_heal: bool = typer.Option(
+        False,
+        "--auto-heal",
+        "-H",
+        help="Autonomously synthesize, apply, and verify a code patch if crashes are detected",
     ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
@@ -332,6 +341,43 @@ def run(
             console.print("[dim]Opening HTML report in browser...[/dim]")
             webbrowser.open(f"file:///{report_file.resolve()}")
 
+    # 4.5 Autonomous Self-Healing Loop
+    if report.has_crashes and auto_heal and run_dir:
+        console.print("\n[bold magenta]🚑 [SELF-HEALING] Crashes detected! Initiating autonomous patch synthesis...[/bold magenta]")
+        healer = CodeHealer()
+        with Status("[bold yellow]Synthesizing surgical code patch...[/bold yellow]", console=console):
+            patch = healer.synthesize_patch(run_dir)
+
+        if patch.get("success"):
+            target_file = Path(patch["target_file"])
+            console.print(
+                Panel(
+                    f"🎯 [bold cyan]Target File:[/bold cyan] {target_file}\n"
+                    f"💡 [bold cyan]Explanation:[/bold cyan] {patch.get('explanation')}",
+                    title="[bold yellow]🩹 Autonomous Patch Synthesized[/bold yellow]",
+                    border_style="yellow",
+                )
+            )
+            with Status("[bold yellow]Applying patch and verifying with reproduction test...[/bold yellow]", console=console):
+                applied = healer.apply_patch(
+                    target_file=target_file,
+                    original_snippet=patch["original_snippet"],
+                    replacement_snippet=patch["replacement_snippet"],
+                )
+                if applied.get("success"):
+                    ver_res = healer.verify_fix(
+                        run_dir,
+                        backup_file=applied.get("backup_file"),
+                        target_file=target_file,
+                    )
+                    if ver_res.get("verified"):
+                        console.print(Panel(ver_res["message"], title="[bold green]🎉 AUTO-HEALING SUCCESS[/bold green]", border_style="green"))
+                        report.crashes.clear()
+                    else:
+                        console.print(Panel(ver_res["message"], title="[bold red]❌ AUTO-HEALING REVERTED[/bold red]", border_style="red"))
+        else:
+            console.print(f"[yellow]⚠ Self-healing skipped: {patch.get('error')}[/yellow]")
+
     # 5. Write GitHub Actions Step Summary if available
     has_violations = any(item.get("status") == "VIOLATED" for item in evaluations) if evaluations else False
     CIGate.write_github_step_summary(
@@ -353,10 +399,14 @@ def run(
 @app.command()
 def fix(
     run_id: Optional[str] = typer.Argument(None, help="Specific run ID to diagnose (defaults to latest incident)"),
+    apply: bool = typer.Option(False, "--apply", "-a", help="Autonomously apply the surgical patch to source code and verify"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip interactive confirmation prompt when applying patch"),
+    verify: bool = typer.Option(True, "--verify/--no-verify", help="Execute deterministic reproduction test to verify fix"),
     model: str = typer.Option("gemini/gemini-3.6-flash", "--model", "-m", help="AI model to query via LiteLLM"),
 ):
     """Analyze a captured crash with AI reasoning and generate an automated fix."""
     brain = AIBrain()
+    healer = CodeHealer()
     
     with Status("[bold yellow]LOKI AI Brain is analyzing crash evidence...[/bold yellow]", console=console):
         result = brain.diagnose_and_fix(run_id=run_id, model=model)
@@ -371,6 +421,69 @@ def fix(
             border_style="green",
         )
     )
+
+    if apply:
+        target_run_dir = healer.replayer.get_run_dir(run_id)
+        if not target_run_dir:
+            console.print(f"[bold red]Error:[/bold red] Run directory '{run_id or 'latest'}' not found.")
+            raise typer.Exit(code=1)
+
+        console.print("\n[bold cyan]🔧 Synthesizing autonomous surgical code patch...[/bold cyan]")
+        with Status("[bold yellow]LOKI Self-Healing Engine is crafting patch...[/bold yellow]", console=console):
+            patch = healer.synthesize_patch(target_run_dir, model=model)
+
+        if not patch.get("success"):
+            console.print(f"[bold red]Healing Error:[/bold red] {patch.get('error')}")
+            raise typer.Exit(code=1)
+
+        target_file = Path(patch["target_file"])
+        console.print(
+            Panel(
+                f"🎯 [bold cyan]Target File:[/bold cyan] {target_file}\n"
+                f"💡 [bold cyan]Explanation:[/bold cyan] {patch.get('explanation')}\n\n"
+                f"[bold yellow]Original Snippet:[/bold yellow]\n```\n{patch.get('original_snippet')}\n```\n\n"
+                f"[bold green]Replacement Snippet:[/bold green]\n```\n{patch.get('replacement_snippet')}\n```",
+                title=f"[bold yellow]🩹 Proposed Surgical Patch[/bold yellow]",
+                border_style="yellow",
+            )
+        )
+
+        if not yes:
+            if not Confirm.ask("Do you want LOKI to apply this patch to your code?", default=True):
+                console.print("[dim]Self-healing cancelled by user.[/dim]")
+                return
+
+        with Status("[bold yellow]Applying patch to source code...[/bold yellow]", console=console):
+            applied = healer.apply_patch(
+                target_file=target_file,
+                original_snippet=patch["original_snippet"],
+                replacement_snippet=patch["replacement_snippet"],
+            )
+
+        if not applied.get("success"):
+            console.print(f"[bold red]Patch Failed:[/bold red] {applied.get('error')}")
+            raise typer.Exit(code=1)
+
+        console.print(f"\n[bold green]✔ Patch applied successfully to `{target_file}`![/bold green]")
+        if applied.get("diff"):
+            console.print(Panel(Syntax(applied["diff"], "diff", theme="monokai"), title="Unified Diff Preview", border_style="cyan"))
+
+        if verify:
+            console.print("\n[bold cyan]🧪 Executing deterministic reproduction test to verify fix...[/bold cyan]")
+            with Status("[bold yellow]Testing whether crash is permanently resolved...[/bold yellow]", console=console):
+                ver_res = healer.verify_fix(
+                    target_run_dir,
+                    backup_file=applied.get("backup_file"),
+                    target_file=target_file,
+                )
+
+            if ver_res.get("verified"):
+                console.print(Panel(ver_res["message"], title="[bold green]🎉 SELF-HEALING SUCCESS[/bold green]", border_style="green"))
+            else:
+                console.print(Panel(ver_res["message"], title="[bold red]❌ SELF-HEALING FAILED[/bold red]", border_style="red"))
+                if ver_res.get("output"):
+                    console.print(f"[dim]{ver_res['output']}[/dim]")
+                raise typer.Exit(code=1)
 
 @app.command()
 def record(
