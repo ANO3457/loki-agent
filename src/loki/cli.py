@@ -22,6 +22,7 @@ from src.loki.engine.sandbox import ChaosSandbox
 from src.loki.engine.reporter import IncidentReporter
 from src.loki.engine.scanner import ProjectScanner
 from src.loki.personas.rage_clicker import RageClickerPersona
+from src.loki.personas.novice_chaotic import NoviceChaoticPersona
 from src.loki.ai.brain import AIBrain
 from src.loki.engine.recorder import JourneyRecorder
 from src.loki.engine.replayer import IncidentReplayer
@@ -35,6 +36,7 @@ app = typer.Typer(
 
 class PersonaChoice(str, Enum):
     RAGE_CLICKER = "rage-clicker"
+    NOVICE_CHAOTIC = "novice-chaotic"
     NONE = "none"
 
 @app.callback(invoke_without_command=True)
@@ -163,6 +165,8 @@ def run(
     active_persona = None
     if persona == PersonaChoice.RAGE_CLICKER:
         active_persona = RageClickerPersona()
+    elif persona == PersonaChoice.NOVICE_CHAOTIC:
+        active_persona = NoviceChaoticPersona()
 
     persona_label = active_persona.name if active_persona else "Passive Observer"
     console.print(f"[bold cyan]⚡ Target URL:[/bold cyan] {resolved_url}")
