@@ -70,7 +70,8 @@ d:/Proyectos/agente-ia/
 │           ├── rage_clicker.py # RageClickerPersona: Burst clicks & race conditions
 │           ├── novice_chaotic.py # NoviceChaoticPersona: Input fuzzing, emojis & erratic keys
 │           ├── network_tormentor.py # NetworkTormentorPersona: Latency throttling & offline drops
-│           └── adversary.py    # AdversaryPersona: Security probes, disabled locks bypass & tampering
+│           ├── adversary.py    # AdversaryPersona: Security probes, disabled locks bypass & tampering
+│           └── swarm.py        # SwarmPersona: Orchestrates all chaos personas in multi-vector waves
 ├── AGENTS.md                   # This instruction manual for AI coding agents
 ├── requirements.txt            # Core dependencies (typer, rich, playwright, pyyaml, litellm)
 └── SPECIFICATION.md            # Product specification and roadmap
@@ -89,8 +90,9 @@ python -m src.loki.cli init
 # 2. Record interactive user workflows with credential masking
 python -m src.loki.cli record --name checkout_flow
 
-# 3. Execute chaotic testing (unguided or guided by recorded journey)
+# 3. Execute chaotic testing (unguided, guided by journey, or swarm mode)
 python -m src.loki.cli run
+python -m src.loki.cli run --swarm          # Run all personas in coordinated assault waves
 python -m src.loki.cli run --journey checkout_flow
 python -m src.loki.cli run -p novice-chaotic --duration 5 --headed
 python -m src.loki.cli run --open       # Automatically open HTML report in browser

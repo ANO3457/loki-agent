@@ -27,6 +27,7 @@ from src.loki.personas.rage_clicker import RageClickerPersona
 from src.loki.personas.novice_chaotic import NoviceChaoticPersona
 from src.loki.personas.network_tormentor import NetworkTormentorPersona
 from src.loki.personas.adversary import AdversaryPersona
+from src.loki.personas.swarm import SwarmPersona
 from src.loki.ai.brain import AIBrain
 from src.loki.ai.chat import LokiChatSession
 from src.loki.engine.recorder import JourneyRecorder
@@ -44,6 +45,8 @@ class PersonaChoice(str, Enum):
     NOVICE_CHAOTIC = "novice-chaotic"
     NETWORK_TORMENTOR = "network-tormentor"
     ADVERSARY = "adversary"
+    SWARM = "swarm"
+    ALL = "all"
     NONE = "none"
 
 @app.callback(invoke_without_command=True)
@@ -126,7 +129,13 @@ def run(
         PersonaChoice.RAGE_CLICKER,
         "--persona",
         "-p",
-        help="Synthetic chaos persona to simulate (rage-clicker or none)",
+        help="Synthetic chaos persona to simulate (rage-clicker, novice-chaotic, network-tormentor, adversary, swarm, all, none)",
+    ),
+    swarm: bool = typer.Option(
+        False,
+        "--swarm",
+        "-s",
+        help="Run Swarm Mode (orchestrates all chaos personas in coordinated assault waves)",
     ),
     journey: Optional[str] = typer.Option(
         None,
@@ -181,7 +190,9 @@ def run(
     resolved_duration = duration if duration is not None else target_config.get("timeout_seconds", 5)
 
     active_persona = None
-    if persona == PersonaChoice.RAGE_CLICKER:
+    if swarm or persona in [PersonaChoice.SWARM, PersonaChoice.ALL]:
+        active_persona = SwarmPersona()
+    elif persona == PersonaChoice.RAGE_CLICKER:
         active_persona = RageClickerPersona()
     elif persona == PersonaChoice.NOVICE_CHAOTIC:
         active_persona = NoviceChaoticPersona()
@@ -190,7 +201,11 @@ def run(
     elif persona == PersonaChoice.ADVERSARY:
         active_persona = AdversaryPersona()
 
-    persona_label = active_persona.name if active_persona else "Passive Observer"
+    if active_persona and active_persona.name == "Swarm":
+        persona_label = "Swarm 🐝 [dim](NoviceChaotic, Adversary, NetworkTormentor, RageClicker)[/dim]"
+    else:
+        persona_label = active_persona.name if active_persona else "Passive Observer"
+
     console.print(f"[bold cyan]⚡ Target URL:[/bold cyan] {resolved_url}")
     if journey_data:
         console.print(f"[bold blue]🗺️ Guided Journey:[/bold blue] {journey_data.get('name')} ({journey_data.get('total_steps')} steps)")
