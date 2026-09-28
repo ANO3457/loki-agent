@@ -66,6 +66,7 @@ d:/Proyectos/agente-ia/
 │       │   ├── scrubber.py     # NetworkScrubber: Sanitizes HAR traces, auth tokens & cookies
 │       │   ├── recorder.py     # JourneyRecorder: Interactive DOM event recorder & secret masking
 │       │   ├── replayer.py     # IncidentReplayer: Deterministic test execution and video player
+│       │   ├── ci.py           # CIGate: CI environment detection, exit codes & GitHub Step Summary
 │       │   └── scanner.py      # ProjectScanner: Tech stack detector for 'loki init'
 │       └── personas/
 │           ├── __init__.py
@@ -75,6 +76,9 @@ d:/Proyectos/agente-ia/
 │           ├── network_tormentor.py # NetworkTormentorPersona: Latency throttling & offline drops
 │           ├── adversary.py    # AdversaryPersona: Security probes, disabled locks bypass & tampering
 │           └── swarm.py        # SwarmPersona: Orchestrates all chaos personas in multi-vector waves
+├── .github/
+│   └── workflows/
+│       └── loki.yml            # Automated CI/CD chaos quality gate & artifact archiving
 ├── AGENTS.md                   # This instruction manual for AI coding agents
 ├── requirements.txt            # Core dependencies (typer, rich, playwright, pyyaml, litellm)
 └── SPECIFICATION.md            # Product specification and roadmap
@@ -100,6 +104,8 @@ python -m src.loki.cli run --journey checkout_flow
 python -m src.loki.cli run -p novice-chaotic --duration 5 --headed
 python -m src.loki.cli run --open       # Automatically open HTML report in browser
 python -m src.loki.cli run --no-rules    # Disable AI business rules evaluation
+python -m src.loki.cli run --ci          # Strict CI/CD quality gate (exit code 1 on failures, writes GITHUB_STEP_SUMMARY)
+python -m src.loki.cli run --strict      # Fail with exit code 1 if any crash or rule violation is detected
 
 # 4. Generate or open interactive visual HTML report
 python -m src.loki.cli report

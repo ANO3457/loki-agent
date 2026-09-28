@@ -32,6 +32,7 @@ from src.loki.ai.brain import AIBrain
 from src.loki.ai.chat import LokiChatSession
 from src.loki.engine.recorder import JourneyRecorder
 from src.loki.engine.replayer import IncidentReplayer
+from src.loki.engine.ci import CIGate
 
 console = Console()
 app = typer.Typer(
@@ -160,8 +161,22 @@ def run(
         "-o",
         help="Automatically open the generated HTML report in the default browser",
     ),
+    ci: bool = typer.Option(
+        False,
+        "--ci",
+        help="Run in strict CI/CD mode (fails with exit code 1 on crashes or business rule violations, writes GITHUB_STEP_SUMMARY)",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Fail with exit code 1 if any crash or business rule violation is detected",
+    ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
+    is_ci_mode = ci or strict or CIGate.is_ci_environment()
+    if is_ci_mode:
+        open_report = False
+
     # 1. Load journey blueprint if specified
     journey_data = None
     if journey:
@@ -316,6 +331,24 @@ def run(
         if report_file.exists():
             console.print("[dim]Opening HTML report in browser...[/dim]")
             webbrowser.open(f"file:///{report_file.resolve()}")
+
+    # 5. Write GitHub Actions Step Summary if available
+    has_violations = any(item.get("status") == "VIOLATED" for item in evaluations) if evaluations else False
+    CIGate.write_github_step_summary(
+        report=report,
+        evaluations=evaluations,
+        run_dir=run_dir,
+        has_violations=has_violations,
+    )
+
+    # 6. CI/CD Quality Gate Enforcement
+    if is_ci_mode:
+        if report.has_crashes or has_violations:
+            console.print("\n[bold red]❌ CI/CD Quality Gate FAILED: Crashes or business rule violations detected.[/bold red]")
+            raise typer.Exit(code=1)
+        else:
+            console.print("\n[bold green]✔ CI/CD Quality Gate PASSED: 0 crashes and all business rules satisfied.[/bold green]")
+            raise typer.Exit(code=0)
 
 @app.command()
 def fix(
