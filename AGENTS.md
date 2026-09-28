@@ -54,7 +54,8 @@ d:/Proyectos/agente-ia/
 │       ├── cli.py              # Typer CLI application entry point
 │       ├── ai/
 │       │   ├── __init__.py
-│       │   └── brain.py        # AIBrain: LiteLLM integration, diagnosis, rules evaluation
+│       │   ├── brain.py        # AIBrain: LiteLLM integration, diagnosis, rules evaluation
+│       │   └── chat.py         # LokiChatSession: Interactive conversational QA terminal REPL
 │       ├── engine/
 │       │   ├── __init__.py
 │       │   ├── sandbox.py      # ChaosSandbox: Isolated Playwright browser, sniffer, DOM snapshot
@@ -107,6 +108,10 @@ python -m src.loki.cli fix <run_id>
 # 6. Deterministically replay captured incident or open video
 python -m src.loki.cli replay
 python -m src.loki.cli replay --video
+
+# 7. Launch interactive conversational QA assistant in terminal
+python -m src.loki.cli chat
+python -m src.loki.cli chat --model gemini/gemini-3.5-flash-lite
 ```
 
 ---

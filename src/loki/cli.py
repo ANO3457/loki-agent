@@ -28,6 +28,7 @@ from src.loki.personas.novice_chaotic import NoviceChaoticPersona
 from src.loki.personas.network_tormentor import NetworkTormentorPersona
 from src.loki.personas.adversary import AdversaryPersona
 from src.loki.ai.brain import AIBrain
+from src.loki.ai.chat import LokiChatSession
 from src.loki.engine.recorder import JourneyRecorder
 from src.loki.engine.replayer import IncidentReplayer
 
@@ -465,6 +466,14 @@ def report(
     if open_browser:
         console.print("[dim]Opening report in default web browser...[/dim]")
         webbrowser.open(resolved_uri)
+
+@app.command()
+def chat(
+    model: str = typer.Option("gemini/gemini-3.5-flash-lite", "--model", "-m", help="AI model to query via LiteLLM"),
+):
+    """Launch interactive conversational QA and chaos testing assistant REPL."""
+    session = LokiChatSession(model=model)
+    session.start()
 
 if __name__ == "__main__":
     app()
