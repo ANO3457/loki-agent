@@ -2,35 +2,37 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from src.loki.engine.sandbox import IncidentReport
+from src.loki.engine.html_reporter import HTMLReporter
 
 
 class IncidentReporter:
-    """Persists crash evidence and synthesizes automated reproduction scripts."""
+    """Persists crash evidence and synthesizes automated reproduction scripts and HTML reports."""
 
     def __init__(self, base_output_dir: str = ".loki/runs"):
         self.base_output_dir = Path(base_output_dir)
 
-    def save_incident(self, report: IncidentReport) -> Optional[Path]:
-        """Creates an incident bundle with metadata, video replay, and repro test."""
-        if not report.has_crashes:
-            return None
-
-        # Generate a unique run directory name based on timestamp
+    def save_session(
+        self,
+        report: IncidentReport,
+        rules_evaluations: Optional[List[Dict[str, Any]]] = None,
+    ) -> Path:
+        """Saves a complete test execution session bundle with HTML report and video."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_dir = self.base_output_dir / f"run_{timestamp}"
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. Relocate recorded video to the incident directory
-        final_video_path = None
+        final_video_file = None
         if report.video_path and Path(report.video_path).exists():
             dest_video = run_dir / "replay.webm"
             shutil.move(report.video_path, dest_video)
-            final_video_path = str(dest_video)
+            final_video_file = "replay.webm"
 
         # 2. Save incident metadata in incident.json
         metadata = {
+            "run_id": run_dir.name,
             "timestamp": datetime.now().isoformat(),
             "target_url": report.target_url,
             "persona": report.persona_name,
@@ -40,18 +42,35 @@ class IncidentReporter:
             "http_errors": report.http_errors,
             "console_errors_count": len(report.console_errors),
             "actions_executed_count": len(report.actions_taken),
-            "video_file": "replay.webm" if final_video_path else None,
+            "actions_taken": report.actions_taken,
+            "rules_evaluations": rules_evaluations or [],
+            "video_file": final_video_file,
         }
 
         with open(run_dir / "incident.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
-        # 3. Generate the standalone Playwright reproduction test
-        repro_code = self._generate_repro_script(report)
-        with open(run_dir / "repro_test.py", "w", encoding="utf-8") as f:
-            f.write(repro_code)
+        # 3. Generate the standalone Playwright reproduction test if crashes occurred
+        if report.has_crashes:
+            repro_code = self._generate_repro_script(report)
+            with open(run_dir / "repro_test.py", "w", encoding="utf-8") as f:
+                f.write(repro_code)
+
+        # 4. Generate the standalone HTML report
+        html_file = run_dir / "report.html"
+        HTMLReporter.generate(metadata, html_file)
 
         return run_dir
+
+    def save_incident(
+        self,
+        report: IncidentReport,
+        rules_evaluations: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Path]:
+        """Creates an incident bundle if crashes or HTTP errors were detected."""
+        if not report.has_crashes:
+            return None
+        return self.save_session(report, rules_evaluations)
 
     def _generate_repro_script(self, report: IncidentReport) -> str:
         """Synthesizes a minimal standalone Python script reproducing the crash."""

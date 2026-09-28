@@ -58,7 +58,8 @@ d:/Proyectos/agente-ia/
 │       ├── engine/
 │       │   ├── __init__.py
 │       │   ├── sandbox.py      # ChaosSandbox: Isolated Playwright browser, sniffer, DOM snapshot
-│       │   ├── reporter.py     # IncidentReporter: Packages runs and repro scripts
+│       │   ├── reporter.py     # IncidentReporter: Packages runs, repro scripts & bundles
+│       │   ├── html_reporter.py # HTMLReporter: Standalone visual HTML dashboard with video & scorecard
 │       │   ├── recorder.py     # JourneyRecorder: Interactive DOM event recorder & secret masking
 │       │   ├── replayer.py     # IncidentReplayer: Deterministic test execution and video player
 │       │   └── scanner.py      # ProjectScanner: Tech stack detector for 'loki init'
@@ -89,13 +90,19 @@ python -m src.loki.cli record --name checkout_flow
 python -m src.loki.cli run
 python -m src.loki.cli run --journey checkout_flow
 python -m src.loki.cli run -p novice-chaotic --duration 5 --headed
+python -m src.loki.cli run --open       # Automatically open HTML report in browser
 python -m src.loki.cli run --no-rules    # Disable AI business rules evaluation
 
-# 4. Diagnose latest crash and generate code patch using AI Brain
+# 4. Generate or open interactive visual HTML report
+python -m src.loki.cli report
+python -m src.loki.cli report <run_id>
+python -m src.loki.cli report --no-open
+
+# 5. Diagnose latest crash and generate code patch using AI Brain
 python -m src.loki.cli fix
 python -m src.loki.cli fix <run_id>
 
-# 5. Deterministically replay captured incident or open video
+# 6. Deterministically replay captured incident or open video
 python -m src.loki.cli replay
 python -m src.loki.cli replay --video
 ```
