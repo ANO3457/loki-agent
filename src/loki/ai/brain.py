@@ -25,7 +25,7 @@ class AIBrain:
         run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
         return run_dirs[0]
 
-    def diagnose_and_fix(self, run_id: Optional[str] = None, model: str = "gemini/gemini-3.5-flash-lite") -> Dict[str, Any]:
+    def diagnose_and_fix(self, run_id: Optional[str] = None, model: str = "gemini/gemini-3.6-flash") -> Dict[str, Any]:
         """Analyzes an incident using LLM reasoning and proposes an exact patch."""
         # 1. Resolve run directory
         if run_id:
@@ -103,7 +103,7 @@ Please provide your answer with the following structure:
         self,
         report: IncidentReport,
         rules_content: str,
-        model: str = "gemini/gemini-3.5-flash-lite",
+        model: str = "gemini/gemini-3.6-flash",
     ) -> List[Dict[str, Any]]:
         """Evaluates plain English business assertions against execution evidence."""
         prompt = f"""You are LOKI's Autonomous Business Logic Verification Engine.

@@ -353,7 +353,7 @@ def run(
 @app.command()
 def fix(
     run_id: Optional[str] = typer.Argument(None, help="Specific run ID to diagnose (defaults to latest incident)"),
-    model: str = typer.Option("gemini/gemini-3.5-flash-lite", "--model", "-m", help="AI model to query via LiteLLM"),
+    model: str = typer.Option("gemini/gemini-3.6-flash", "--model", "-m", help="AI model to query via LiteLLM"),
 ):
     """Analyze a captured crash with AI reasoning and generate an automated fix."""
     brain = AIBrain()
@@ -517,7 +517,7 @@ def report(
 
 @app.command()
 def chat(
-    model: str = typer.Option("gemini/gemini-3.5-flash-lite", "--model", "-m", help="AI model to query via LiteLLM"),
+    model: str = typer.Option("gemini/gemini-3.6-flash", "--model", "-m", help="AI model to query via LiteLLM"),
 ):
     """Launch interactive conversational QA and chaos testing assistant REPL."""
     session = LokiChatSession(model=model)

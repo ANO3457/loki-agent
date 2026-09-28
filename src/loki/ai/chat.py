@@ -16,7 +16,7 @@ from rich.status import Status
 class LokiChatSession:
     """Interactive conversational terminal REPL for pair QA testing, incident queries, and advice."""
 
-    def __init__(self, model: str = "gemini/gemini-3.5-flash-lite", runs_dir: str = ".loki/runs"):
+    def __init__(self, model: str = "gemini/gemini-3.6-flash", runs_dir: str = ".loki/runs"):
         self.model = model
         self.runs_dir = Path(runs_dir)
         self.console = Console()
@@ -208,18 +208,65 @@ Project & Testing Context:
             # Multi-turn conversational query
             self.history.append({"role": "user", "content": user_input})
 
-            with Status("[bold yellow]LOKI is thinking...[/bold yellow]", console=self.console):
-                try:
-                    response = litellm.completion(
-                        model=self.model,
-                        messages=self.history,
-                    )
-                    reply_text = response.choices[0].message.content or "No response received."
-                    self.history.append({"role": "assistant", "content": reply_text})
-                except Exception as e:
-                    self.console.print(f"[bold red]AI Error:[/bold red] {e}")
-                    self.console.print("[dim]Make sure your API key (e.g. GEMINI_API_KEY) is configured.[/dim]")
-                    continue
+            # Prevent context bloat by retaining only recent conversation turns
+            active_messages = self.history
+            if len(self.history) > 12:
+                # Keep system prompt at index 0, take last 10 messages
+                active_messages = [self.history[0]] + self.history[-10:]
 
-            # Render response with Rich Markdown
-            self.console.print("\n", Markdown(reply_text))
+            # Models to attempt with fallback if 503 high demand occurs
+            candidate_models = [self.model]
+            for fallback in ["gemini/gemini-3.6-flash", "gemini/gemini-flash-lite-latest", "gemini/gemini-3.5-flash-lite"]:
+                if fallback not in candidate_models:
+                    candidate_models.append(fallback)
+
+            success = False
+            for target_model in candidate_models:
+                try:
+                    with Status(f"[bold yellow]LOKI is thinking...[/bold yellow]", console=self.console):
+                        stream_response = litellm.completion(
+                            model=target_model,
+                            messages=active_messages,
+                            stream=True,
+                            timeout=25,
+                            num_retries=1,
+                        )
+                        # Read first token inside the status spinner to ensure response has started
+                        first_chunk = ""
+                        for chunk in stream_response:
+                            delta = chunk.choices[0].delta.content or ""
+                            if delta:
+                                first_chunk = delta
+                                break
+
+                    # Stream text cleanly to stdout
+                    self.console.print()
+                    sys.stdout.write(first_chunk)
+                    sys.stdout.flush()
+
+                    collected = [first_chunk]
+                    for chunk in stream_response:
+                        delta = chunk.choices[0].delta.content or ""
+                        if delta:
+                            sys.stdout.write(delta)
+                            sys.stdout.flush()
+                            collected.append(delta)
+
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+
+                    full_reply = "".join(collected)
+                    self.history.append({"role": "assistant", "content": full_reply})
+                    success = True
+                    break
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if "503" in err_str or "unavailable" in err_str or "timeout" in err_str:
+                        # Silently try next fallback model
+                        continue
+                    else:
+                        self.console.print(f"\n[bold red]AI Error:[/bold red] {e}")
+                        break
+
+            if not success:
+                self.console.print("\n[bold red]AI Error:[/bold red] Service currently experiencing high demand. Please try again in a moment.")
