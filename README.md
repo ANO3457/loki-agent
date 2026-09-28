@@ -69,7 +69,13 @@ At the end of an assault session, LOKI's AI Brain (`gemini-3.5-flash-lite` via L
 
 ### 1. Installation
 
-#### Option A: Global Isolated Install with `uv` (Recommended)
+#### Option A: Standalone Precompiled Binaries (Zero Python Required)
+Download the standalone executable directly from [GitHub Releases](https://github.com/Elabsurdo984/loki-agent/releases):
+* **Windows**: `loki-windows-amd64.exe`
+* **Linux**: `loki-linux-amd64`
+* **macOS (Apple Silicon)**: `loki-macos-arm64`
+
+#### Option B: Global Isolated Install with `uv` (Recommended for developers)
 ```bash
 # Install globally as a standalone command (fastest):
 uv tool install git+https://github.com/Elabsurdo984/loki-agent.git
@@ -78,12 +84,12 @@ uv tool install git+https://github.com/Elabsurdo984/loki-agent.git
 uvx --from git+https://github.com/Elabsurdo984/loki-agent.git loki run http://localhost:8000 --swarm
 ```
 
-#### Option B: Global Install with `pipx`
+#### Option C: Global Install with `pipx`
 ```bash
 pipx install git+https://github.com/Elabsurdo984/loki-agent.git
 ```
 
-#### Option C: Local Development from Source
+#### Option D: Local Development from Source
 ```bash
 git clone https://github.com/Elabsurdo984/loki-agent.git
 cd loki-agent

@@ -78,8 +78,10 @@ d:/Proyectos/agente-ia/
 │           └── swarm.py        # SwarmPersona: Orchestrates all chaos personas in multi-vector waves
 ├── .github/
 │   └── workflows/
-│       └── loki.yml            # Automated CI/CD chaos quality gate & artifact archiving
+│       ├── loki.yml            # Automated CI/CD chaos quality gate & artifact archiving
+│       └── release.yml         # Cross-platform binary compilation & GitHub releases
 ├── AGENTS.md                   # This instruction manual for AI coding agents
+├── loki_entry.py               # Standalone runner entrypoint for PyInstaller compilation
 ├── pyproject.toml              # Modern PEP 517/621 packaging, entrypoint & dependencies
 ├── requirements.txt            # Core dependencies (typer, rich, playwright, pyyaml, litellm)
 └── SPECIFICATION.md            # Product specification and roadmap
