@@ -51,7 +51,7 @@ jobs:
 
       - name: 🔨 Compile Standalone Binary with PyInstaller
         run: |
-          pyinstaller --noconfirm loki.spec
+          pyinstaller --noconfirm --onefile --name loki --collect-all playwright --collect-all litellm --collect-all rich --collect-all typer loki_entry.py
 
       - name: 🏷️ Rename binary for release
         shell: bash
