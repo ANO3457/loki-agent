@@ -68,22 +68,29 @@ At the end of an assault session, LOKI's AI Brain (`gemini-3.5-flash-lite` via L
 ## 🚀 Quickstart
 
 ### 1. Installation
-Clone the repository and install dependencies:
+
+#### Option A: Global Isolated Install with `uv` (Recommended)
+```bash
+# Install globally as a standalone command (fastest):
+uv tool install git+https://github.com/Elabsurdo984/loki-agent.git
+
+# Or run instantly without installing (like npx):
+uvx --from git+https://github.com/Elabsurdo984/loki-agent.git loki run http://localhost:8000 --swarm
+```
+
+#### Option B: Global Install with `pipx`
+```bash
+pipx install git+https://github.com/Elabsurdo984/loki-agent.git
+```
+
+#### Option C: Local Development from Source
 ```bash
 git clone https://github.com/Elabsurdo984/loki-agent.git
 cd loki-agent
 
-# Create virtual environment
 python -m venv .venv
-
-# Activate (Windows PowerShell)
-.\.venv\Scripts\Activate.ps1
-# Activate (Linux / macOS)
-source .venv/bin/activate
-
-# Install dependencies and Playwright browser
-pip install -r requirements.txt
-playwright install chromium
+# Activate: .\.venv\Scripts\Activate.ps1 (Windows) or source .venv/bin/activate (Linux/macOS)
+pip install -e .
 ```
 
 ### 2. Configure AI Brain (Optional for AI features)
@@ -99,17 +106,17 @@ export GEMINI_API_KEY="your-gemini-api-key"
 ### 3. Initialize Workspace
 Analyze your target project and generate `.loki/` configuration:
 ```bash
-python -m src.loki.cli init
+loki init
 ```
 
 ### 4. Unleash Chaos
 Execute an exploratory chaos attack on your local or remote application:
 ```bash
 # Run 6-second Swarm assault and open visual HTML report
-python -m src.loki.cli run http://localhost:8000 --swarm --duration 6 --open
+loki run http://localhost:8000 --swarm --duration 6 --open
 
 # Run specific persona in visible browser
-python -m src.loki.cli run http://localhost:8000 -p adversary --headed
+loki run http://localhost:8000 -p adversary --headed
 ```
 
 ---
@@ -118,16 +125,16 @@ python -m src.loki.cli run http://localhost:8000 -p adversary --headed
 
 | Command | Description |
 | :--- | :--- |
-| `python -m src.loki.cli init` | Detect project tech stack and initialize `.loki/` config and rules |
-| `python -m src.loki.cli record --name <flow>` | Interactively record a user journey blueprint with credential masking |
-| `python -m src.loki.cli run [url]` | Execute chaos attack session against target URL |
-| `python -m src.loki.cli run --swarm` | Orchestrate all 4 chaos personas in coordinated assault waves |
-| `python -m src.loki.cli run --journey <name>` | Attack a specific recorded journey blueprint |
-| `python -m src.loki.cli run --ci` | Run in strict CI/CD mode (exit code 1 on failures, writes Step Summary) |
-| `python -m src.loki.cli report` | View or generate standalone HTML dashboard for latest or specific run |
-| `python -m src.loki.cli fix` | Diagnose latest captured crash with AI reasoning and generate code patch |
-| `python -m src.loki.cli replay` | Deterministically replay captured incident or open video (`--video`) |
-| `python -m src.loki.cli chat` | Launch conversational QA terminal assistant REPL |
+| `loki init` | Detect project tech stack and initialize `.loki/` config and rules |
+| `loki record --name <flow>` | Interactively record a user journey blueprint with credential masking |
+| `loki run [url]` | Execute chaos attack session against target URL |
+| `loki run --swarm` | Orchestrate all 4 chaos personas in coordinated assault waves |
+| `loki run --journey <name>` | Attack a specific recorded journey blueprint |
+| `loki run --ci` | Run in strict CI/CD mode (exit code 1 on failures, writes Step Summary) |
+| `loki report` | View or generate standalone HTML dashboard for latest or specific run |
+| `loki fix` | Diagnose latest captured crash with AI reasoning and generate code patch |
+| `loki replay` | Deterministically replay captured incident or open video (`--video`) |
+| `loki chat` | Launch conversational QA terminal assistant REPL |
 
 ---
 

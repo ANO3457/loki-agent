@@ -50,7 +50,19 @@ class ChaosSandbox:
         temp_har_file = self.output_dir / f"temp_network_{int(start_time)}.har"
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
+            try:
+                browser = p.chromium.launch(headless=self.headless)
+            except Error as e:
+                err_msg = str(e).lower()
+                if "executable doesn't exist" in err_msg or "playwright install" in err_msg:
+                    import subprocess
+                    import sys
+                    from rich.console import Console
+                    Console().print("[bold yellow]⚡ Chromium browser not found. Installing automatically via Playwright...[/bold yellow]")
+                    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+                    browser = p.chromium.launch(headless=self.headless)
+                else:
+                    raise e
             context = browser.new_context(
                 record_video_dir=str(self.output_dir / "videos"),
                 record_video_size={"width": 1280, "height": 720},

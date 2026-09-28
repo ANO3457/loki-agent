@@ -11,6 +11,12 @@ __pycache__/
 *.so
 .pytest_cache/
 
+# Distribution and packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
 # LOKI local runs, videos, and evidence (keep local)
 .loki/runs/
 .loki/knowledge.json

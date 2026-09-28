@@ -80,6 +80,7 @@ d:/Proyectos/agente-ia/
 │   └── workflows/
 │       └── loki.yml            # Automated CI/CD chaos quality gate & artifact archiving
 ├── AGENTS.md                   # This instruction manual for AI coding agents
+├── pyproject.toml              # Modern PEP 517/621 packaging, entrypoint & dependencies
 ├── requirements.txt            # Core dependencies (typer, rich, playwright, pyyaml, litellm)
 └── SPECIFICATION.md            # Product specification and roadmap
 ```
