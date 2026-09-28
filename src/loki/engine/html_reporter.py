@@ -86,6 +86,61 @@ class HTMLReporter:
             </div>
             """
 
+        # Sanitized Network HAR section
+        har_html = ""
+        har_file = data.get("har_file")
+        if har_file and (output_file.parent / har_file).exists():
+            try:
+                with open(output_file.parent / har_file, "r", encoding="utf-8") as f:
+                    har_data = json.load(f)
+                entries = har_data.get("log", {}).get("entries", [])
+                if entries:
+                    req_rows = ""
+                    for entry in entries[:25]:
+                        req = entry.get("request", {})
+                        res = entry.get("response", {})
+                        method = html.escape(req.get("method", "GET"))
+                        req_url = html.escape(req.get("url", ""))
+                        status = res.get("status", 0)
+                        status_cls = "badge-success" if 200 <= status < 400 else ("badge-danger" if status >= 500 else "badge-warning")
+                        time_ms = f"{entry.get('time', 0):.0f}ms"
+                        req_rows += f"""
+                        <tr>
+                            <td style="font-weight: bold; font-family: monospace;">{method}</td>
+                            <td style="text-align: center;"><span class="badge {status_cls}">{status}</span></td>
+                            <td style="font-family: monospace; font-size: 12px; word-break: break-all;">{req_url}</td>
+                            <td style="text-align: right; color: #8b949e; font-size: 12px;">{time_ms}</td>
+                        </tr>
+                        """
+
+                    har_html = f"""
+                    <div class="card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h2 style="margin: 0;">🌐 Sanitized Network Archive ({len(entries)} requests)</h2>
+                            <span class="badge badge-success" style="font-size: 11px;">🔒 Auth & Cookies Redacted</span>
+                        </div>
+                        <p style="color: var(--text-dim); font-size: 13px; margin-top: 0;">
+                            All authorization headers, session cookies, and API keys have been scrubbed by <strong>LOKI Network Scrubber</strong>.
+                            Trace file: <code>{html.escape(har_file)}</code>.
+                        </p>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 10%;">Method</th>
+                                    <th style="width: 10%; text-align: center;">Status</th>
+                                    <th style="width: 65%;">Target Endpoint (Scrubbed)</th>
+                                    <th style="width: 15%; text-align: right;">Latency</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {req_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                    """
+            except Exception:
+                pass
+
         html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -344,6 +399,8 @@ class HTMLReporter:
             <h2>💥 Crash & Exception Sniffer</h2>
             {crashes_html}
         </div>
+
+        {har_html}
 
         <div class="card">
             <h2>📜 Chronological Actions Timeline ({len(actions)})</h2>

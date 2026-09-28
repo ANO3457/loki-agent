@@ -16,6 +16,7 @@ class IncidentReport:
     http_errors: List[str] = field(default_factory=list)
     actions_taken: List[str] = field(default_factory=list)
     video_path: Optional[str] = None
+    har_path: Optional[str] = None
     dom_snapshot: Optional[str] = None
     duration_seconds: float = 0.0
 
@@ -46,12 +47,14 @@ class ChaosSandbox:
             persona_name=persona.name if persona else None,
         )
         start_time = time.time()
+        temp_har_file = self.output_dir / f"temp_network_{int(start_time)}.har"
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             context = browser.new_context(
                 record_video_dir=str(self.output_dir / "videos"),
                 record_video_size={"width": 1280, "height": 720},
+                record_har_path=str(temp_har_file),
             )
             page: Page = context.new_page()
 
@@ -136,6 +139,8 @@ class ChaosSandbox:
 
                 if video_obj:
                     report.video_path = video_obj.path()
+                if temp_har_file.exists():
+                    report.har_path = str(temp_har_file)
 
         report.duration_seconds = round(time.time() - start_time, 2)
         return report

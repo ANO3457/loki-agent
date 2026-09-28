@@ -45,6 +45,8 @@ d:/Proyectos/agente-ia/
 │       └── run_YYYYMMDD_HHMMSS/
 │           ├── incident.json   # Full incident metadata, crashes, and console logs
 │           ├── replay.webm     # Video recording of the failure session
+│           ├── network.har     # Sanitized HTTP network archive (tokens & cookies scrubbed)
+│           ├── report.html     # Standalone visual HTML dashboard
 │           └── repro_test.py   # Standalone deterministic Playwright reproduction test
 ├── playground/                 # Local testbed for chaos testing and reproduction
 │   └── index.html              # Test web application with realistic vulnerabilities
@@ -61,6 +63,7 @@ d:/Proyectos/agente-ia/
 │       │   ├── sandbox.py      # ChaosSandbox: Isolated Playwright browser, sniffer, DOM snapshot
 │       │   ├── reporter.py     # IncidentReporter: Packages runs, repro scripts & bundles
 │       │   ├── html_reporter.py # HTMLReporter: Standalone visual HTML dashboard with video & scorecard
+│       │   ├── scrubber.py     # NetworkScrubber: Sanitizes HAR traces, auth tokens & cookies
 │       │   ├── recorder.py     # JourneyRecorder: Interactive DOM event recorder & secret masking
 │       │   ├── replayer.py     # IncidentReplayer: Deterministic test execution and video player
 │       │   └── scanner.py      # ProjectScanner: Tech stack detector for 'loki init'

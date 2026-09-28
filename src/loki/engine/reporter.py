@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from src.loki.engine.sandbox import IncidentReport
 from src.loki.engine.html_reporter import HTMLReporter
+from src.loki.engine.scrubber import NetworkScrubber
 
 
 class IncidentReporter:
@@ -30,7 +31,19 @@ class IncidentReporter:
             shutil.move(report.video_path, dest_video)
             final_video_file = "replay.webm"
 
-        # 2. Save incident metadata in incident.json
+        # 2. Relocate and scrub recorded network trace (HAR)
+        final_har_file = None
+        if report.har_path and Path(report.har_path).exists():
+            dest_har = run_dir / "network.har"
+            scrubbed = NetworkScrubber.scrub_har_file(Path(report.har_path), dest_har)
+            if scrubbed and dest_har.exists():
+                final_har_file = "network.har"
+            try:
+                Path(report.har_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        # 3. Save incident metadata in incident.json
         metadata = {
             "run_id": run_dir.name,
             "timestamp": datetime.now().isoformat(),
@@ -45,6 +58,7 @@ class IncidentReporter:
             "actions_taken": report.actions_taken,
             "rules_evaluations": rules_evaluations or [],
             "video_file": final_video_file,
+            "har_file": final_har_file,
         }
 
         with open(run_dir / "incident.json", "w", encoding="utf-8") as f:
