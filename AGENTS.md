@@ -103,6 +103,8 @@ python -m src.loki.cli record --name checkout_flow
 
 # 3. Execute chaotic testing (unguided, guided by journey, or swarm mode)
 python -m src.loki.cli run
+python -m src.loki.cli run --device iphone-15 # Mobile device emulation & responsive layout audit
+python -m src.loki.cli run -m pixel-7 --orientation landscape
 python -m src.loki.cli run --swarm          # Run all personas in coordinated assault waves
 python -m src.loki.cli run --journey checkout_flow
 python -m src.loki.cli run -p novice-chaotic --duration 5 --headed

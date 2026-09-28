@@ -20,12 +20,16 @@ class HTMLReporter:
         http_errors = data.get("http_errors", [])
         actions = data.get("actions_taken", [])
         rules_evals = data.get("rules_evaluations", [])
+        device = data.get("device")
+        orientation = data.get("orientation", "portrait")
+        layout_issues = data.get("layout_issues", [])
 
         # Verdict calculation
         has_violations = any(r.get("status") == "VIOLATED" for r in rules_evals)
         has_crashes = len(crashes) > 0 or len(http_errors) > 0
-        
-        if has_crashes or has_violations:
+        has_layout_issues = len(layout_issues) > 0
+
+        if has_crashes or has_violations or has_layout_issues:
             verdict_badge = '<span class="badge badge-danger">FAIL / ISSUES DETECTED</span>'
             verdict_border = "border-danger"
         else:
@@ -85,6 +89,42 @@ class HTMLReporter:
                 </div>
             </div>
             """
+
+        # Device stat card
+        device_stat_card = ""
+        if device:
+            device_stat_card = f"""
+            <div class="stat-card">
+                <div class="stat-label">Emulated Device</div>
+                <div class="stat-value">📱 {html.escape(device)} ({html.escape(orientation)})</div>
+            </div>
+            """
+
+        # Mobile & Responsive layout audit section
+        layout_html = ""
+        if device:
+            if layout_issues:
+                issues_li = "".join(f'<li style="margin-bottom: 6px;">{html.escape(issue)}</li>' for issue in layout_issues)
+                layout_html = f"""
+                <div class="card">
+                    <h2>📱 Mobile & Responsive Layout Audit</h2>
+                    <div style="background-color: #21262d; border-radius: 6px; padding: 16px; border-left: 4px solid var(--accent-red);">
+                        <p style="margin-top: 0; font-weight: bold; color: var(--accent-red);">⚠ Responsive Design Anomalies Detected ({html.escape(device)}):</p>
+                        <ul style="margin: 0; padding-left: 20px; color: #e6edf3;">
+                            {issues_li}
+                        </ul>
+                    </div>
+                </div>
+                """
+            else:
+                layout_html = f"""
+                <div class="card">
+                    <h2>📱 Mobile & Responsive Layout Audit</h2>
+                    <div class="no-errors">
+                        🛡️ Zero mobile layout overflows detected on {html.escape(device)} ({html.escape(orientation)}). Clean responsive scaling.
+                    </div>
+                </div>
+                """
 
         # Sanitized Network HAR section
         har_html = ""
@@ -367,6 +407,7 @@ class HTMLReporter:
                 <div class="stat-label">Active Persona</div>
                 <div class="stat-value">{persona}</div>
             </div>
+            {device_stat_card}
             <div class="stat-card">
                 <div class="stat-label">Session Duration</div>
                 <div class="stat-value">{duration}</div>
@@ -378,6 +419,7 @@ class HTMLReporter:
         </div>
 
         {video_html}
+        {layout_html}
 
         <div class="card">
             <h2>📋 Business Rules Verification Scorecard</h2>

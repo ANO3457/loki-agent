@@ -126,6 +126,9 @@ Execute an exploratory chaos attack on your local or remote application:
 # Run 6-second Swarm assault and open visual HTML report
 loki run http://localhost:8000 --swarm --duration 6 --open
 
+# Emulate mobile viewport & audit responsive overflows (iPhone 15, Pixel 7, iPad Pro)
+loki run http://localhost:8000 --device iphone-15 --orientation portrait
+
 # Run specific persona in visible browser
 loki run http://localhost:8000 -p adversary --headed
 ```
@@ -139,6 +142,7 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki init` | Detect project tech stack and initialize `.loki/` config and rules |
 | `loki record --name <flow>` | Interactively record a user journey blueprint with credential masking |
 | `loki run [url]` | Execute chaos attack session against target URL |
+| `loki run --device <name>` | Emulate mobile device (e.g. `iphone-15`, `pixel-7`, `ipad-pro-11`) & audit layout |
 | `loki run --swarm` | Orchestrate all 4 chaos personas in coordinated assault waves |
 | `loki run --auto-heal` | Autonomously synthesize, apply, and verify a code fix on crash |
 | `loki run --journey <name>` | Attack a specific recorded journey blueprint |

@@ -34,10 +34,20 @@ class CIGate:
             "| :--- | :--- |",
             f"| **Target URL** | `{report.target_url}` |",
             f"| **Active Persona** | `{report.persona_name or 'Passive Observer'}` |",
+        ]
+        if report.device_name:
+            lines.append(f"| **Emulated Device** | 📱 `{report.device_name} ({report.orientation})` |")
+        lines.extend([
             f"| **Duration** | `{report.duration_seconds}s` |",
             f"| **Crashes Detected** | `{len(report.crashes) + len(report.http_errors)}` |",
             f"| **Actions Executed** | `{len(report.actions_taken)}` |\n",
-        ]
+        ])
+
+        if report.layout_issues:
+            lines.append("### 📱 Mobile & Responsive Layout Anomalies\n")
+            for issue in report.layout_issues:
+                lines.append(f"- ⚠️ {issue}")
+            lines.append("")
 
         if evaluations:
             lines.append("### 📋 Business Rules Verification\n")

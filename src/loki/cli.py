@@ -180,6 +180,17 @@ def run(
         "-H",
         help="Autonomously synthesize, apply, and verify a code patch if crashes are detected",
     ),
+    device: Optional[str] = typer.Option(
+        None,
+        "--device",
+        "-m",
+        help="Emulate a mobile device (e.g. 'iphone-15', 'pixel-7', 'ipad-pro-11')",
+    ),
+    orientation: str = typer.Option(
+        "portrait",
+        "--orientation",
+        help="Screen orientation for mobile device emulation ('portrait' or 'landscape')",
+    ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
     is_ci_mode = ci or strict or CIGate.is_ci_environment()
@@ -234,6 +245,8 @@ def run(
     if journey_data:
         console.print(f"[bold blue]🗺️ Guided Journey:[/bold blue] {journey_data.get('name')} ({journey_data.get('total_steps')} steps)")
     console.print(f"[bold magenta]🎭 Active Persona:[/bold magenta] {persona_label}")
+    if device:
+        console.print(f"[bold green]📱 Emulated Device:[/bold green] {device} ({orientation})")
 
     sandbox = ChaosSandbox(headless=not headed)
 
@@ -244,6 +257,8 @@ def run(
             duration=resolved_duration,
             persona=active_persona,
             journey_data=journey_data,
+            device_name=device,
+            orientation=orientation,
         )
 
     console.print(f"\n[bold green]✔ Attack session finished in {report.duration_seconds}s[/bold green]")
@@ -334,6 +349,11 @@ def run(
 
     if report.console_errors:
         console.print(f"\n[bold yellow]⚠ Console Warnings/Errors logged: {len(report.console_errors)}[/bold yellow]")
+
+    if report.layout_issues:
+        console.print(f"\n[bold yellow]📱 Mobile Responsive Layout Anomalies ({len(report.layout_issues)}):[/bold yellow]")
+        for issue in report.layout_issues:
+            console.print(f"  [yellow]•[/yellow] {issue}")
 
     if run_dir and open_report:
         report_file = run_dir / "report.html"

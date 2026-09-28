@@ -134,6 +134,8 @@ Evaluate the following business assertions against the live application behavior
 
 ### Execution Evidence:
 - Target URL: {report.target_url}
+- Emulated Device: {report.device_name or 'Desktop Standard'} ({report.orientation})
+- Mobile Responsive Layout Anomalies: {json.dumps(report.layout_issues, indent=2)}
 - Actions Taken: {json.dumps(report.actions_taken, indent=2)}
 - Unhandled Crashes Detected: {len(report.crashes)}
 - Crash Details: {json.dumps(report.crashes, indent=2)}
