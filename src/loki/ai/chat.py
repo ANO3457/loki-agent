@@ -6,6 +6,8 @@ from typing import List, Dict, Any, Optional
 import litellm
 litellm.suppress_debug_info = True
 
+from src.loki.config import resolve_model
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -16,8 +18,8 @@ from rich.status import Status
 class LokiChatSession:
     """Interactive conversational terminal REPL for pair QA testing, incident queries, and advice."""
 
-    def __init__(self, model: str = "gemini/gemini-3.6-flash", runs_dir: str = ".loki/runs"):
-        self.model = model
+    def __init__(self, model: Optional[str] = None, runs_dir: str = ".loki/runs"):
+        self.model = resolve_model(model)
         self.runs_dir = Path(runs_dir)
         self.console = Console()
         self.history: List[Dict[str, str]] = []

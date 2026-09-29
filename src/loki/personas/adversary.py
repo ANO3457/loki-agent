@@ -119,9 +119,9 @@ class AdversaryPersona(BasePersona):
 
     def attack_step(self, page: Page, step: dict):
         """Mutates recorded journey steps with security bypasses and payload injections."""
-        event_type = step.get("type")
+        event_type = step.get("action") or step.get("type")
         selector = step.get("selector")
-        target_name = step.get("text") or step.get("id") or selector
+        target_name = step.get("value") or step.get("text") or step.get("id") or selector
 
         if event_type == "input":
             payload = random.choice(self.ADVERSARIAL_PAYLOADS)

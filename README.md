@@ -42,7 +42,7 @@ Define human-readable business invariants in `.loki/rules.md`:
 - "Double clicking payment button must never trigger duplicate charges or unhandled errors."
 - "Invalid coupon codes must display an error message and keep checkout button disabled."
 ```
-At the end of an assault session, LOKI's AI Brain (`gemini-3.5-flash-lite` via LiteLLM) observes the live DOM snapshot, console logs, and network events to evaluate each rule as **`PASSED`** or **`VIOLATED`** with detailed evidence.
+At the end of an assault session, LOKI's AI Brain (model set in `.loki/config.yaml` under `ai.model`, via LiteLLM) observes the live DOM snapshot, console logs, and network events to evaluate each rule as **`PASSED`** or **`VIOLATED`** with detailed evidence.
 
 ### 🌐 3. Forensic Network Capture & Privacy Scrubber (`network.har`)
 * Automatically captures full HTTP network traffic in standard `.har` format.

@@ -120,9 +120,9 @@ class NetworkTormentorPersona(BasePersona):
 
     def attack_step(self, page: Page, step: dict):
         """Mutates a recorded journey step by dropping the network during execution."""
-        event_type = step.get("type")
+        event_type = step.get("action") or step.get("type")
         selector = step.get("selector")
-        target_name = step.get("text") or step.get("id") or selector
+        target_name = step.get("value") or step.get("text") or step.get("id") or selector
 
         if event_type == "click":
             self.log_action(f"NetworkTormentor: Intercepting step '{target_name}' with mid-click offline drop")

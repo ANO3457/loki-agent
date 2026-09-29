@@ -18,7 +18,7 @@ class SwarmPersona(BasePersona):
     - RageClicker: High-frequency concurrent click bursts and race condition probes.
     """
 
-    def __init__(self):
+    def __init__(self, click_burst_count: int = 5):
         super().__init__(
             name="Swarm",
             description="Coordinates all chaos personas in multi-vector assault waves against the target application.",
@@ -26,7 +26,7 @@ class SwarmPersona(BasePersona):
         self.novice = NoviceChaoticPersona()
         self.adversary = AdversaryPersona()
         self.network = NetworkTormentorPersona()
-        self.rage = RageClickerPersona()
+        self.rage = RageClickerPersona(click_burst_count=click_burst_count)
         self.sub_personas = [self.novice, self.adversary, self.network, self.rage]
 
     def _sync_logs(self, persona: BasePersona):

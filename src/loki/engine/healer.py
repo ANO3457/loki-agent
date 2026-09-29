@@ -11,6 +11,7 @@ import litellm
 litellm.suppress_debug_info = True
 
 from src.loki.engine.replayer import IncidentReplayer
+from src.loki.config import resolve_model
 
 
 class CodeHealer:
@@ -57,7 +58,7 @@ class CodeHealer:
     def synthesize_patch(
         self,
         run_dir: Path,
-        model: str = "gemini/gemini-3.6-flash",
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Uses LLM reasoning to synthesize a surgical, minimal replacement patch."""
         incident_file = run_dir / "incident.json"
@@ -75,20 +76,16 @@ class CodeHealer:
             }
 
         source_code = target_file.read_text(encoding="utf-8")
+        model = model or resolve_model()
         crashes = incident_data.get("crashes", [])
 
         # Check for API key
         has_api_key = any(k in os.environ for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
         if not has_api_key:
             # Deterministic fallback for common playground race condition
-            if "playground" in str(target_file) and "payButton" in source_code:
-                return {
-                    "success": True,
-                    "target_file": str(target_file),
-                    "explanation": "Add immediate client-side button disabling and debounce lockout to prevent race condition clicks.",
-                    "original_snippet": '            // Simulates an 800ms asynchronous network transaction\n            setTimeout(() => {',
-                    "replacement_snippet": '            // Lock execution and disable UI interactions immediately\n            payButton.disabled = true;\n            payButton.style.opacity = "0.6";\n            payButton.style.cursor = "not-allowed";\n\n            // Simulates an 800ms asynchronous network transaction\n            setTimeout(() => {',
-                }
+            fallback = self._playground_fallback_patch(target_file, source_code)
+            if fallback:
+                return fallback
             return {
                 "success": False,
                 "error": "No LLM API key detected in environment (GEMINI_API_KEY, OPENAI_API_KEY).",
@@ -145,16 +142,33 @@ Do NOT output any markdown formatting or commentary outside the JSON.
                 continue
 
         # Fallback if cloud API is unavailable (e.g. 503 spike or network issue)
-        if "playground" in str(target_file) and "payButton" in source_code:
-            return {
-                "success": True,
-                "target_file": str(target_file),
-                "explanation": "Add immediate client-side button disabling and debounce lockout to prevent race condition clicks.",
-                "original_snippet": '            // Simulates an 800ms asynchronous network transaction\n            setTimeout(() => {',
-                "replacement_snippet": '            // Lock execution and disable UI interactions immediately\n            payButton.disabled = true;\n            payButton.style.opacity = "0.6";\n            payButton.style.cursor = "not-allowed";\n\n            // Simulates an 800ms asynchronous network transaction\n            setTimeout(() => {',
-            }
+        fallback = self._playground_fallback_patch(target_file, source_code)
+        if fallback:
+            return fallback
 
         return {"success": False, "error": "AI model failed to synthesize a valid surgical JSON patch."}
+
+    @staticmethod
+    def _playground_fallback_patch(target_file: Path, source_code: str) -> Optional[Dict[str, Any]]:
+        """Offline patch for the bundled playground; offered only if its exact snippet is still present and unpatched."""
+        code = source_code.replace("\r\n", "\n")
+        original = "            // Simulates an 800ms asynchronous network transaction\n            setTimeout(() => {"
+        if "playground" not in str(target_file) or original not in code:
+            return None
+        if "payButton.disabled = true;\n\n            // Simulates" in code:
+            return None
+        return {
+            "success": True,
+            "target_file": str(target_file),
+            "explanation": "Add immediate client-side button disabling and debounce lockout to prevent race condition clicks.",
+            "original_snippet": original,
+            "replacement_snippet": (
+                "            // Lock execution and disable UI interactions immediately\n"
+                "            payButton.disabled = true;\n"
+                '            payButton.style.opacity = "0.6";\n'
+                '            payButton.style.cursor = "not-allowed";\n\n' + original
+            ),
+        }
 
     def generate_diff(self, original_text: str, modified_text: str, filepath: str) -> str:
         """Generates a standard unified diff representation."""

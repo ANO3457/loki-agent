@@ -6,6 +6,8 @@ from typing import Optional, Dict, Any, List
 import litellm
 litellm.suppress_debug_info = True
 from src.loki.engine.sandbox import IncidentReport
+from src.loki.engine.healer import CodeHealer
+from src.loki.config import resolve_model
 
 
 class AIBrain:
@@ -25,7 +27,7 @@ class AIBrain:
         run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
         return run_dirs[0]
 
-    def diagnose_and_fix(self, run_id: Optional[str] = None, model: str = "gemini/gemini-3.6-flash") -> Dict[str, Any]:
+    def diagnose_and_fix(self, run_id: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
         """Analyzes an incident using LLM reasoning and proposes an exact patch."""
         # 1. Resolve run directory
         if run_id:
@@ -40,11 +42,14 @@ class AIBrain:
         with open(target_dir / "incident.json", "r", encoding="utf-8") as f:
             incident_data = json.load(f)
 
-        # 3. Read target vulnerable source code (from playground if available)
+        # 3. Read the source file most likely responsible for the crash
         source_context = ""
-        playground_file = Path("playground/index.html")
-        if playground_file.exists():
-            source_context = f"\nRelevant source file (`playground/index.html`):\n```html\n{playground_file.read_text(encoding='utf-8')}\n```"
+        source_file = CodeHealer(runs_dir=str(self.runs_dir)).resolve_source_file(incident_data)
+        if source_file and source_file.exists():
+            try:
+                source_context = f"\nRelevant source file (`{source_file}`):\n```\n{source_file.read_text(encoding='utf-8')}\n```"
+            except (OSError, UnicodeDecodeError):
+                source_context = ""
 
         prompt = f"""You are LOKI, an elite AI Chaos & Software Quality Engineer.
 Analyze this real-world application crash and synthesize a precise diagnosis and fix.
@@ -53,6 +58,7 @@ Analyze this real-world application crash and synthesize a precise diagnosis and
 - Target URL: {incident_data.get('target_url')}
 - Attacker Persona: {incident_data.get('persona')}
 - Unhandled Crashes: {json.dumps(incident_data.get('crashes'), indent=2)}
+- HTTP Errors: {json.dumps(incident_data.get('http_errors'), indent=2)}
 - Attacker Actions: {incident_data.get('actions_executed_count')} actions recorded
 {source_context}
 
@@ -71,16 +77,13 @@ Please provide your answer with the following structure:
                 "incident": incident_data,
                 "diagnosis": (
                     "⚠ **No LLM API key detected** (GEMINI_API_KEY, OPENAI_API_KEY, etc.).\n\n"
-                    "**Deterministic Local Diagnosis:**\n"
-                    "- **Root Cause:** Race condition in `payButton` click listener. Multiple concurrent clicks occurred while `isProcessing` was `true`.\n"
-                    "- **Impact:** Double billing, corrupted account balance, and unhandled JavaScript runtime exceptions.\n"
-                    "- **Recommended Fix:** Disable the button immediately on first click (`payButton.disabled = true;`) or add a debounce guard before processing.\n\n"
-                    "_Tip: Set `GEMINI_API_KEY` in your environment to enable real-time dynamic AI diagnosis._"
-                )
+                    + self._local_diagnosis(incident_data, source_file)
+                    + "\n\n_Tip: Set `GEMINI_API_KEY` in your environment to enable real-time dynamic AI diagnosis._"
+                ),
             }
 
         models_to_try = [
-            model,
+            model or resolve_model(),
             "gemini/gemini-flash-lite-latest",
             "gemini/gemini-2.5-flash",
             "gemini/gemini-3.5-flash-lite",
@@ -111,19 +114,37 @@ Please provide your answer with the following structure:
             "run_id": target_dir.name,
             "incident": incident_data,
             "diagnosis": (
-                f"⚠ **Cloud AI Model Temporarily Busy (503 Service Spike). Activated Local Deterministic Diagnosis:**\n\n"
-                f"- **Root Cause:** Race condition in `payButton` click listener. Multiple concurrent clicks occurred while `isProcessing` was `true`.\n"
-                f"- **Impact:** Double billing, corrupted account balance, and unhandled JavaScript runtime exceptions.\n"
-                f"- **Recommended Fix:** Disable the button immediately on first click (`payButton.disabled = true;`) or add a debounce guard before processing.\n\n"
-                f"_(Original error: {last_error})_"
+                "⚠ **Cloud AI models unavailable. Activated local diagnosis:**\n\n"
+                + self._local_diagnosis(incident_data, source_file)
+                + f"\n\n_(Original error: {last_error})_"
             ),
         }
+
+    @staticmethod
+    def _local_diagnosis(incident_data: Dict[str, Any], source_file: Optional[Path]) -> str:
+        """Builds an offline diagnosis strictly from the evidence stored in the incident."""
+        crashes = incident_data.get("crashes") or []
+        http_errors = incident_data.get("http_errors") or []
+        lines = ["**Local Diagnosis (evidence only, no AI reasoning):**"]
+        if crashes:
+            lines.append("- **Unhandled errors:** " + "; ".join(crashes[:5]))
+        if http_errors:
+            lines.append("- **Server failures:** " + "; ".join(http_errors[:5]))
+        if not crashes and not http_errors:
+            lines.append("- No crash evidence was recorded in this incident.")
+        lines.append(f"- **Persona:** {incident_data.get('persona') or 'Passive Observer'}")
+        lines.append(
+            f"- **Suspected source file:** `{source_file}`" if source_file
+            else "- **Suspected source file:** could not be determined."
+        )
+        lines.append("- **Next step:** run `loki replay` to reproduce it, then inspect the file above around the failing code path.")
+        return "\n".join(lines)
 
     def evaluate_business_rules(
         self,
         report: IncidentReport,
         rules_content: str,
-        model: str = "gemini/gemini-3.6-flash",
+        model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Evaluates plain English business assertions against execution evidence."""
         prompt = f"""You are LOKI's Autonomous Business Logic Verification Engine.
@@ -161,7 +182,7 @@ Respond ONLY with a valid JSON array of objects following this exact schema:
                 "observation": "No API key configured in environment."
             }]
 
-        models_to_try = [model, "gemini/gemini-flash-latest"]
+        models_to_try = [model or resolve_model(), "gemini/gemini-flash-latest"]
 
         last_error = "Unknown error"
         for m in models_to_try:

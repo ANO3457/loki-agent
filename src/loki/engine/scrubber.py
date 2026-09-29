@@ -104,11 +104,9 @@ class NetworkScrubber:
         """Sanitizes cookies list by redacting sensitive values."""
         scrubbed = []
         for c in cookies:
-            name = c.get("name", "")
             cookie_copy = dict(c)
-            if cls.is_sensitive_key(name) or True:
-                # All cookie values in recorded tests are considered sensitive
-                cookie_copy["value"] = "[REDACTED]"
+            # All cookie values are treated as sensitive regardless of name
+            cookie_copy["value"] = "[REDACTED]"
             scrubbed.append(cookie_copy)
         return scrubbed
 

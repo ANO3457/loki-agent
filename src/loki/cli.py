@@ -15,6 +15,8 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import webbrowser
+from src.loki import __version__
+from src.loki.config import load_loki_config
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
@@ -71,7 +73,7 @@ def main(ctx: typer.Context):
                 "[bold white]Welcome to LOKI's Chaos Realm.[/bold white]\n\n"
                 "[dim]Autonomous agent simulating hostile users and breaking your software before production.[/dim]\n\n"
                 "Run [bold cyan]python -m src.loki.cli --help[/bold cyan] to see available commands.",
-                title="[bold yellow]⚡ LOKI Agent v0.1.0[/bold yellow]",
+                title=f"[bold yellow]⚡ LOKI Agent v{__version__}[/bold yellow]",
                 border_style="red",
             )
         )
@@ -79,7 +81,7 @@ def main(ctx: typer.Context):
 @app.command()
 def version():
     """Display the installed version of Loki."""
-    console.print("[bold yellow]LOKI Agent[/bold yellow] version [bold green]0.1.0[/bold green]")
+    console.print(f"[bold yellow]LOKI Agent[/bold yellow] version [bold green]{__version__}[/bold green]")
 
 @app.command()
 def init(
@@ -113,24 +115,13 @@ def init(
         )
     )
 
-def load_loki_config() -> dict:
-    """Reads project configuration from .loki/config.yaml if available."""
-    config_file = Path(".loki/config.yaml")
-    if config_file.exists():
-        try:
-            with open(config_file, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-        except Exception:
-            pass
-    return {}
-
 @app.command()
 def run(
     url: Optional[str] = typer.Argument(None, help="The target URL to test (defaults to .loki/config.yaml if omitted)"),
     duration: Optional[int] = typer.Option(None, "--duration", "-d", help="Execution duration in seconds"),
     headed: bool = typer.Option(False, "--headed", help="Run browser in visible mode (default is headless)"),
-    persona: PersonaChoice = typer.Option(
-        PersonaChoice.RAGE_CLICKER,
+    persona: Optional[PersonaChoice] = typer.Option(
+        None,
         "--persona",
         "-p",
         help="Synthetic chaos persona to simulate (rage-clicker, novice-chaotic, network-tormentor, adversary, swarm, all, none)",
@@ -223,12 +214,19 @@ def run(
         raise typer.Exit(code=1)
 
     resolved_duration = duration if duration is not None else target_config.get("timeout_seconds", 5)
+    chaos_config = config.get("chaos", {})
+    burst_count = int(chaos_config.get("click_burst_count", 5))
+    if persona is None:
+        try:
+            persona = PersonaChoice(chaos_config.get("default_persona", "rage-clicker"))
+        except ValueError:
+            persona = PersonaChoice.RAGE_CLICKER
 
     active_persona = None
     if swarm or persona in [PersonaChoice.SWARM, PersonaChoice.ALL]:
-        active_persona = SwarmPersona()
+        active_persona = SwarmPersona(click_burst_count=burst_count)
     elif persona == PersonaChoice.RAGE_CLICKER:
-        active_persona = RageClickerPersona()
+        active_persona = RageClickerPersona(click_burst_count=burst_count)
     elif persona == PersonaChoice.NOVICE_CHAOTIC:
         active_persona = NoviceChaoticPersona()
     elif persona == PersonaChoice.NETWORK_TORMENTOR:
@@ -248,7 +246,7 @@ def run(
     if device:
         console.print(f"[bold green]📱 Emulated Device:[/bold green] {device} ({orientation})")
 
-    sandbox = ChaosSandbox(headless=not headed)
+    sandbox = ChaosSandbox(headless=target_config.get("headless", True) and not headed)
 
     status_msg = f"Executing guided chaos assault on {journey_data.get('name')}..." if journey_data else f"Unleashing {persona_label}..."
     with Status(f"[bold yellow]{status_msg}[/bold yellow]", console=console):
@@ -422,7 +420,7 @@ def fix(
     apply: bool = typer.Option(False, "--apply", "-a", help="Autonomously apply the surgical patch to source code and verify"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip interactive confirmation prompt when applying patch"),
     verify: bool = typer.Option(True, "--verify/--no-verify", help="Execute deterministic reproduction test to verify fix"),
-    model: str = typer.Option("gemini/gemini-3.6-flash", "--model", "-m", help="AI model to query via LiteLLM"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="AI model via LiteLLM (defaults to .loki/config.yaml ai.model)"),
 ):
     """Analyze a captured crash with AI reasoning and generate an automated fix."""
     brain = AIBrain()
@@ -650,7 +648,7 @@ def report(
 
 @app.command()
 def chat(
-    model: str = typer.Option("gemini/gemini-3.6-flash", "--model", "-m", help="AI model to query via LiteLLM"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="AI model via LiteLLM (defaults to .loki/config.yaml ai.model)"),
 ):
     """Launch interactive conversational QA and chaos testing assistant REPL."""
     session = LokiChatSession(model=model)
