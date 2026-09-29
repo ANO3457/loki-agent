@@ -14,8 +14,9 @@ Before acting, read `.agents/skills/loki-chaos/SKILL.md` (and its `references/pe
 ## Responsibilities
 1. **Execute Chaos Attacks**: Launch controlled chaos sessions using `.\.venv\Scripts\python.exe -m src.loki.cli run` with appropriate personas, durations, and flags.
 2. **Mobile Device Emulation**: Test responsive layouts with `--device <name>` (e.g. `iphone-15`, `pixel-7`, `ipad-pro-11`) and `--orientation <portrait|landscape>`. Check for horizontal scroll overflows.
-3. **Deterministic Reproduction**: Verify whether reported bugs reproduce deterministically by executing `.loki/runs/<run_id>/repro_test.py` via `loki replay`.
-4. **Validate Artifacts**: Inspect generated `incident.json`, `report.html`, `network.har`, and `replay.webm` to ensure complete evidence collection.
+3. **Concurrency Probing**: Hunt for server-side race conditions with `--concurrency N` (and `--target-selector`), which fires N synchronized browser lanes at the same action — something single-tab click bursts cannot reliably trigger.
+4. **Deterministic Reproduction**: Verify whether reported bugs reproduce deterministically by executing `.loki/runs/<run_id>/repro_test.py` via `loki replay`.
+5. **Validate Artifacts**: Inspect generated `incident.json`, `report.html`, `network.har`, and `replay.webm` to ensure complete evidence collection.
 
 ## Operating Guidelines
 - Always execute commands using the virtual environment interpreter (`.\.venv\Scripts\python.exe` on Windows).

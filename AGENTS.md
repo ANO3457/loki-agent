@@ -85,6 +85,7 @@ $PYTHON = ".\.venv\Scripts\python.exe"
 &$PYTHON -m src.loki.cli run --device iphone-15 --orientation portrait  # Mobile viewport & responsive audit
 &$PYTHON -m src.loki.cli run -m pixel-7 --orientation landscape         # Android tablet/mobile landscape
 &$PYTHON -m src.loki.cli run --swarm                                   # Orchestrate all 4 personas in waves
+&$PYTHON -m src.loki.cli run -c 3 --target-selector "#pay-button"      # N synchronized lanes probing for race conditions
 &$PYTHON -m src.loki.cli run --journey checkout_flow                   # Guided mutation assault
 &$PYTHON -m src.loki.cli run -p novice-chaotic --duration 5 --headed   # Visible browser execution
 &$PYTHON -m src.loki.cli run --open                                    # Auto-open HTML report dashboard

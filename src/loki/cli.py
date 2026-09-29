@@ -182,6 +182,21 @@ def run(
         "--orientation",
         help="Screen orientation for mobile device emulation ('portrait' or 'landscape')",
     ),
+    concurrency: int = typer.Option(
+        1,
+        "--concurrency",
+        "-c",
+        min=1,
+        help="Open N independent browser lanes and fire the same action on all of them simultaneously, "
+             "to probe for server-side race conditions (double charges, oversold inventory). Runs as its "
+             "own dedicated mode instead of the persona-based chaos attack when > 1.",
+    ),
+    target_selector: Optional[str] = typer.Option(
+        None,
+        "--target-selector",
+        help="CSS selector for the --concurrency probe's synchronized click (defaults to the journey's "
+             "first click step, or the first visible button on the page)",
+    ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
     is_ci_mode = ci or strict or CIGate.is_ci_environment()
@@ -248,16 +263,36 @@ def run(
 
     sandbox = ChaosSandbox(headless=target_config.get("headless", True) and not headed)
 
-    status_msg = f"Executing guided chaos assault on {journey_data.get('name')}..." if journey_data else f"Unleashing {persona_label}..."
-    with Status(f"[bold yellow]{status_msg}[/bold yellow]", console=console):
-        report = sandbox.run_session(
-            target_url=resolved_url,
-            duration=resolved_duration,
-            persona=active_persona,
-            journey_data=journey_data,
-            device_name=device,
-            orientation=orientation,
+    if concurrency > 1:
+        resolved_target_selector = target_selector
+        if not resolved_target_selector and journey_data:
+            for step in journey_data.get("steps", []):
+                if step.get("action") == "click" and step.get("selector"):
+                    resolved_target_selector = step["selector"]
+                    break
+        console.print(
+            f"[bold magenta]🔀 Concurrency Probe:[/bold magenta] {concurrency} synchronized lanes on "
+            f"'{resolved_target_selector or 'auto-detected primary button'}' [dim](chaos persona skipped in this mode)[/dim]"
         )
+        with Status(f"[bold yellow]Firing {concurrency} lanes in lockstep...[/bold yellow]", console=console):
+            report = sandbox.run_concurrent_probe(
+                target_url=resolved_url,
+                concurrency=concurrency,
+                selector=resolved_target_selector,
+                device_name=device,
+                orientation=orientation,
+            )
+    else:
+        status_msg = f"Executing guided chaos assault on {journey_data.get('name')}..." if journey_data else f"Unleashing {persona_label}..."
+        with Status(f"[bold yellow]{status_msg}[/bold yellow]", console=console):
+            report = sandbox.run_session(
+                target_url=resolved_url,
+                duration=resolved_duration,
+                persona=active_persona,
+                journey_data=journey_data,
+                device_name=device,
+                orientation=orientation,
+            )
 
     console.print(f"\n[bold green]✔ Attack session finished in {report.duration_seconds}s[/bold green]")
     if device and not report.device_name:

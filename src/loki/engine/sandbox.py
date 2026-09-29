@@ -1,3 +1,4 @@
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,12 @@ class IncidentReport:
     har_path: Optional[str] = None
     dom_snapshot: Optional[str] = None
     duration_seconds: float = 0.0
+    # Multi-tab concurrency probe: `concurrency` independent browser lanes are
+    # synchronized to fire the same action at (as close as possible to) the same
+    # instant, to catch server-side race conditions single-tab click bursts cannot
+    # (a single page's JS event handlers never truly run concurrently).
+    concurrency: int = 1
+    concurrency_lanes: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_crashes(self) -> bool:
@@ -296,6 +303,157 @@ class ChaosSandbox:
                     report.video_path = video_obj.path()
                 if temp_har_file.exists():
                     report.har_path = str(temp_har_file)
+
+        report.duration_seconds = round(time.time() - start_time, 2)
+        return report
+
+    def _run_concurrency_lane(
+        self,
+        lane: int,
+        barrier: threading.Barrier,
+        target_url: str,
+        selector: Optional[str],
+        device_config: Optional[dict],
+        settle_seconds: float,
+        results: List[Dict[str, Any]],
+        results_lock: threading.Lock,
+    ):
+        """Runs one isolated browser lane: navigate, wait for every other lane to be
+        ready, then fire the target click at (as close as possible to) the same
+        instant as all other lanes, and record what happened.
+
+        Each lane gets its own Playwright connection and browser process — the sync
+        Playwright API has thread affinity, so true concurrent requests require
+        independent browsers driven from independent threads, not one shared page.
+        """
+        lane_result: Dict[str, Any] = {
+            "lane": lane, "selector": selector, "crashes": [], "responses": [], "final_text": None,
+        }
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=self.headless)
+                context = browser.new_context(**(device_config or {}))
+                page = context.new_page()
+
+                page.on("pageerror", lambda err: lane_result["crashes"].append(str(err)))
+
+                def handle_response(response: Response):
+                    try:
+                        if response.request.method in ("POST", "PUT", "PATCH", "DELETE") or response.status >= 400:
+                            lane_result["responses"].append({
+                                "url": response.url, "status": response.status, "method": response.request.method,
+                            })
+                    except Exception:
+                        pass
+
+                page.on("response", handle_response)
+
+                try:
+                    page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+                except Error as e:
+                    lane_result["crashes"].append(f"Navigation error: {str(e)}")
+
+                lane_selector = selector
+                if not lane_selector:
+                    try:
+                        el = page.query_selector("button:visible, input[type='submit']:visible")
+                        lane_selector = BasePersona.resilient_selector(el) if el else None
+                    except Exception:
+                        lane_selector = None
+                lane_result["selector"] = lane_selector
+
+                # Rendezvous: every lane blocks here until all lanes have loaded the
+                # page and resolved their target selector, then all proceed together.
+                try:
+                    barrier.wait(timeout=15)
+                except threading.BrokenBarrierError:
+                    lane_result["crashes"].append("Lane did not reach the synchronized click in time (barrier timeout).")
+
+                if lane_selector:
+                    try:
+                        page.click(lane_selector, timeout=2000, force=True, no_wait_after=True)
+                    except Exception as e:
+                        lane_result["crashes"].append(f"Synchronized click failed: {str(e)}")
+                else:
+                    lane_result["crashes"].append("No clickable target element found for this lane.")
+
+                page.wait_for_timeout(int(settle_seconds * 1000))
+                try:
+                    status_el = page.query_selector("#status-box, .status, [role='alert'], .alert")
+                    if status_el:
+                        lane_result["final_text"] = (status_el.inner_text() or "").strip()
+                except Exception:
+                    pass
+
+                context.close()
+                browser.close()
+        except Exception as e:
+            lane_result["crashes"].append(f"Lane fatal error: {str(e)}")
+
+        with results_lock:
+            results.append(lane_result)
+
+    def run_concurrent_probe(
+        self,
+        target_url: str,
+        concurrency: int,
+        selector: Optional[str] = None,
+        device_name: Optional[str] = None,
+        orientation: str = "portrait",
+        settle_seconds: float = 2.0,
+    ) -> IncidentReport:
+        """Opens `concurrency` independent browser lanes against the same URL and fires
+        the same click on all of them in lockstep, to probe for server-side race
+        conditions (double charges, oversold inventory, duplicate submissions) that a
+        single tab's sequential click bursts cannot trigger."""
+        report = IncidentReport(target_url=target_url, persona_name=None, orientation=orientation, concurrency=concurrency)
+        start_time = time.time()
+
+        with sync_playwright() as p:
+            resolved_device_name, device_config = resolve_device(device_name=device_name, orientation=orientation, devices=p.devices)
+            report.device_requested = device_name
+            report.device_name = resolved_device_name
+
+        barrier = threading.Barrier(concurrency)
+        results: List[Dict[str, Any]] = []
+        results_lock = threading.Lock()
+        threads = [
+            threading.Thread(
+                target=self._run_concurrency_lane,
+                args=(i, barrier, target_url, selector, device_config, settle_seconds, results, results_lock),
+                name=f"loki-concurrency-lane-{i}",
+            )
+            for i in range(concurrency)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        results.sort(key=lambda r: r["lane"])
+        report.concurrency_lanes = results
+
+        success_responses = 0
+        for lane in results:
+            for c in lane["crashes"]:
+                report.crashes.append(f"[lane {lane['lane']}] {c}")
+            for r in lane["responses"]:
+                if r["status"] >= 500:
+                    report.http_errors.append(f"[lane {lane['lane']}] HTTP {r['status']} on {r['url']}")
+                elif r["status"] < 400:
+                    success_responses += 1
+            selector_desc = lane["selector"] or "no target element"
+            status_desc = f", final state: '{lane['final_text']}'" if lane["final_text"] else ""
+            report.actions_taken.append(
+                f"Lane {lane['lane']}: synchronized click on '{selector_desc}' "
+                f"({len(lane['responses'])} tracked responses{status_desc})"
+            )
+
+        if success_responses > 1:
+            report.actions_taken.append(
+                f"⚠ {success_responses} lanes recorded a successful (< 400) response for the same "
+                f"synchronized action — inspect for missing server-side idempotency locks."
+            )
 
         report.duration_seconds = round(time.time() - start_time, 2)
         return report

@@ -23,6 +23,8 @@ class HTMLReporter:
         device = data.get("device")
         orientation = data.get("orientation", "portrait")
         layout_issues = data.get("layout_issues", [])
+        concurrency = data.get("concurrency", 1)
+        concurrency_lanes = data.get("concurrency_lanes", [])
 
         # Verdict calculation
         has_violations = any(r.get("status") == "VIOLATED" for r in rules_evals)
@@ -125,6 +127,49 @@ class HTMLReporter:
                     </div>
                 </div>
                 """
+
+        # Concurrency probe section (multi-lane synchronized click)
+        concurrency_html = ""
+        if concurrency > 1 and concurrency_lanes:
+            success_count = sum(
+                1 for lane in concurrency_lanes
+                for r in lane.get("responses", [])
+                if r.get("status", 0) < 400
+            )
+            lane_rows = ""
+            for lane in concurrency_lanes:
+                statuses = ", ".join(f"{r['method']} {r['status']}" for r in lane.get("responses", [])) or "—"
+                crash_text = "; ".join(lane.get("crashes", [])) or "none"
+                lane_rows += f"""
+                <tr>
+                    <td>Lane {lane.get('lane')}</td>
+                    <td style="font-family: monospace; font-size: 12px;">{html.escape(lane.get('selector') or 'n/a')}</td>
+                    <td style="font-size: 12px;">{html.escape(statuses)}</td>
+                    <td style="font-size: 12px; color: var(--accent-red);">{html.escape(crash_text)}</td>
+                </tr>
+                """
+            warning_banner = ""
+            if success_count > 1:
+                warning_banner = f"""
+                <div style="background-color: #21262d; border-radius: 6px; padding: 16px; border-left: 4px solid var(--accent-red); margin-bottom: 16px;">
+                    <strong style="color: var(--accent-red);">⚠ {success_count} lanes recorded a successful response for the same synchronized action.</strong>
+                    Inspect the target endpoint for a missing server-side idempotency lock.
+                </div>
+                """
+            concurrency_html = f"""
+            <div class="card">
+                <h2>🔀 Concurrency Probe ({concurrency} synchronized lanes)</h2>
+                {warning_banner}
+                <table>
+                    <thead>
+                        <tr><th>Lane</th><th>Target Selector</th><th>Tracked Responses</th><th>Crashes</th></tr>
+                    </thead>
+                    <tbody>
+                        {lane_rows}
+                    </tbody>
+                </table>
+            </div>
+            """
 
         # Sanitized Network HAR section
         har_html = ""
@@ -420,6 +465,7 @@ class HTMLReporter:
 
         {video_html}
         {layout_html}
+        {concurrency_html}
 
         <div class="card">
             <h2>📋 Business Rules Verification Scorecard</h2>

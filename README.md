@@ -55,15 +55,19 @@ At the end of an assault session, LOKI's AI Brain (model set in `.loki/config.ya
 ### ⚡ 5. Deterministic Playwright Reproduction (`repro_test.py`)
 * When an unhandled crash or HTTP 500 error occurs, LOKI automatically synthesizes a standalone Playwright script that replays the *exact* recorded action trace (real selectors, payloads, network drops, and device emulation) — not a generic click simulation — to deterministically reproduce the incident.
 
-### 💬 6. Conversational QA Terminal Assistant (`loki chat`)
+### 🔀 6. Multi-Tab Concurrency Probe (`--concurrency`)
+* Opens N independent, synchronized browser lanes that fire the same action at the same instant, hunting for server-side race conditions (double charges, oversold inventory) that a single tab's sequential click bursts cannot trigger.
+* Flags evidence like multiple lanes both getting a successful response for a one-time action, and ships its own dedicated `repro_test.py` that replays the synchronized race deterministically.
+
+### 💬 7. Conversational QA Terminal Assistant (`loki chat`)
 * Launch an interactive terminal REPL connected to LOKI's AI Brain.
 * Chat about recent runs, analyze crash traces, inspect rules, and receive actionable refactoring suggestions directly in your console.
 
-### 🛡️ 7. Strict CI/CD Quality Gate
+### 🛡️ 8. Strict CI/CD Quality Gate
 * Seamlessly integrates into GitHub Actions, GitLab CI, or pre-commit pipelines (`--ci`, `--strict`).
 * Automatically formats and publishes test summaries to `$GITHUB_STEP_SUMMARY` and enforces deterministic exit codes (`0` on pass, `1` on failure).
 
-### 🚑 8. Autonomous Code Self-Healing (`loki fix --apply` & `loki run --auto-heal`)
+### 🚑 9. Autonomous Code Self-Healing (`loki fix --apply` & `loki run --auto-heal`)
 * Synthesizes precise, minimal surgical code patches to permanently eliminate the root cause of crashes.
 * Safely creates automatic backups (`.loki.bak`), applies the patch to your source code, and runs a closed-loop reproduction verification test.
 * If the crash still reproduces, LOKI automatically restores your code safely from backup.
@@ -143,6 +147,7 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki record --name <flow>` | Interactively record a user journey blueprint with credential masking |
 | `loki run [url]` | Execute chaos attack session against target URL |
 | `loki run --device <name>` | Emulate mobile device (e.g. `iphone-15`, `pixel-7`, `ipad-pro-11`) & audit layout |
+| `loki run --concurrency <N>` | Fire N synchronized browser lanes at the same action to probe for server-side race conditions |
 | `loki run --swarm` | Orchestrate all 4 chaos personas in coordinated assault waves |
 | `loki run --auto-heal` | Autonomously synthesize, apply, and verify a code fix on crash |
 | `loki run --journey <name>` | Attack a specific recorded journey blueprint |
