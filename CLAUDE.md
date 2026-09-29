@@ -7,3 +7,4 @@ All coding agents, including Claude Code, must strictly comply with the guidelin
 2. **Platform Rule**: On Windows PowerShell, NEVER use `&&`; always chain commands with `;` (e.g. `git add . ; git commit -m "..." ; git push`).
 3. **Execution**: Use the virtual environment interpreter (`.\.venv\Scripts\python.exe` or `python -m src.loki.cli`).
 4. **Subagents & Skills**: Consult [.agents/skills/](./.agents/skills/) and [.agents/rules/](./.agents/rules/) for domain-specific runbooks.
+5. Commit messages must be short and contain no added tags mentioning Claude.
