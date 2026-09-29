@@ -44,6 +44,12 @@ class RageClickerPersona(BasePersona):
                 try:
                     element_text = element.inner_text().strip() or "unnamed button"
                     self.log_action(f"Targeting element: '{element_text}' with {self.click_burst_count} rapid clicks")
+                    selector = self.resilient_selector(element)
+                    if selector:
+                        self.record_step(
+                            "click", selector=selector, force=True,
+                            repeat=self.click_burst_count, delay_ms=int(self.click_delay * 1000),
+                        )
 
                     for _ in range(self.click_burst_count):
                         element.click(timeout=300, no_wait_after=True, force=True)
@@ -73,6 +79,10 @@ class RageClickerPersona(BasePersona):
                 elem = page.wait_for_selector(selector, timeout=1000)
                 if elem:
                     self.log_action(f"Guided burst assault on '{label}' ({selector}) with {self.click_burst_count} clicks")
+                    self.record_step(
+                        "click", selector=selector, force=True,
+                        repeat=self.click_burst_count, delay_ms=int(self.click_delay * 1000),
+                    )
                     for _ in range(self.click_burst_count):
                         elem.click(timeout=300, no_wait_after=True, force=True)
                         time.sleep(self.click_delay)

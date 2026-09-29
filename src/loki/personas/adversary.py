@@ -84,11 +84,13 @@ class AdversaryPersona(BasePersona):
                 tampered = self._tamper_hidden_and_readonly(page)
                 if tampered:
                     self.log_action(f"Tampered with {len(tampered)} hidden/readonly fields: {', '.join(tampered[:3])}")
+                    self.record_step("tamper_hidden")
 
                 # Vector 2: Force-unlock disabled buttons (bypassing client UI locks)
                 unlocked = self._force_enable_disabled_controls(page)
                 if unlocked:
                     self.log_action(f"Bypassed client locks on {len(unlocked)} disabled controls: {', '.join(unlocked[:3])}")
+                    self.record_step("force_enable_disabled")
 
                 # Vector 3: Inject adversarial security payloads into visible inputs
                 inputs = page.query_selector_all("input:visible:not([type='submit']):not([type='button']), textarea:visible")
@@ -98,7 +100,10 @@ class AdversaryPersona(BasePersona):
                     input_id = target_input.get_attribute("id") or target_input.get_attribute("name") or "field"
 
                     self.log_action(f"Adversarial probe on '{input_id}' with payload: {payload[:35]}...")
+                    selector = self.resilient_selector(target_input)
                     target_input.fill(payload)
+                    if selector:
+                        self.record_step("fill", selector=selector, value=payload)
                     page.wait_for_timeout(100)
 
                 # Vector 4: Forcibly click action buttons even if application tried to lock them
@@ -107,7 +112,10 @@ class AdversaryPersona(BasePersona):
                     target_btn = random.choice(buttons)
                     btn_text = (target_btn.text_content() or "Submit").strip()[:30]
                     self.log_action(f"Adversarial force-click on '{btn_text}'")
+                    selector = self.resilient_selector(target_btn)
                     target_btn.click(timeout=800, no_wait_after=True, force=True)
+                    if selector:
+                        self.record_step("click", selector=selector, force=True)
 
                 page.wait_for_timeout(350)
 
@@ -130,6 +138,7 @@ class AdversaryPersona(BasePersona):
                 el = page.query_selector(selector)
                 if el:
                     el.fill(payload)
+                    self.record_step("fill", selector=selector, value=payload)
             except Exception:
                 pass
 
@@ -139,10 +148,13 @@ class AdversaryPersona(BasePersona):
                 el = page.query_selector(selector)
                 if el:
                     el.click(timeout=500, no_wait_after=True, force=True)
+                    self.record_step("click", selector=selector, force=True)
                     page.wait_for_timeout(100)
                     # Forcibly remove disabled and click again to probe server-side idempotency
                     self._force_enable_disabled_controls(page)
+                    self.record_step("force_enable_disabled")
                     self.log_action(f"Adversary: Forcing duplicate execution on '{target_name}'")
                     el.click(timeout=500, no_wait_after=True, force=True)
+                    self.record_step("click", selector=selector, force=True)
             except Exception:
                 pass

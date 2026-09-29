@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from playwright.sync_api import sync_playwright, Page, Response, Error
 from src.loki.personas.base import BasePersona
 
@@ -18,6 +18,7 @@ class IncidentReport:
     http_errors: List[str] = field(default_factory=list)
     layout_issues: List[str] = field(default_factory=list)
     actions_taken: List[str] = field(default_factory=list)
+    replay_trace: List[Dict[str, Any]] = field(default_factory=list)
     video_path: Optional[str] = None
     har_path: Optional[str] = None
     dom_snapshot: Optional[str] = None
@@ -222,17 +223,23 @@ class ChaosSandbox:
                     report.layout_issues.extend(self._sniff_mobile_layout(page))
 
                 # Guided journey execution
+                session_trace: List[Dict[str, Any]] = []
                 if journey_data and journey_data.get("steps"):
                     report.actions_taken.append(f"Started guided journey: '{journey_data.get('name')}'")
                     for step in journey_data["steps"]:
                         if persona:
                             persona.attack_step(page=page, step=step)
+                            session_trace.extend(persona.trace)
+                            persona.trace.clear()
                         else:
                             selector = step.get("selector")
                             if step.get("action") == "click" and selector:
                                 page.click(selector, timeout=2000)
+                                session_trace.append({"kind": "click", "selector": selector})
                             elif step.get("action") == "input" and selector:
-                                page.fill(selector, step.get("value", ""))
+                                value = step.get("value", "")
+                                page.fill(selector, value)
+                                session_trace.append({"kind": "fill", "selector": selector, "value": value})
                         time.sleep(0.2)
 
                     if persona:
@@ -240,8 +247,10 @@ class ChaosSandbox:
                 elif persona:
                     persona.attack(page=page, duration=duration)
                     report.actions_taken = persona.actions_log
+                    session_trace.extend(persona.trace)
                 else:
                     time.sleep(duration)
+                report.replay_trace = session_trace
 
             except Error as e:
                 report.crashes.append(f"Navigation error: {str(e)}")

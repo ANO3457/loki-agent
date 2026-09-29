@@ -53,7 +53,7 @@ At the end of an assault session, LOKI's AI Brain (model set in `.loki/config.ya
 * Review incidents offline or share reports across your engineering team.
 
 ### ⚡ 5. Deterministic Playwright Reproduction (`repro_test.py`)
-* When an unhandled crash or HTTP 500 error occurs, LOKI automatically synthesizes a standalone Playwright script that deterministically reproduces the exact incident.
+* When an unhandled crash or HTTP 500 error occurs, LOKI automatically synthesizes a standalone Playwright script that replays the *exact* recorded action trace (real selectors, payloads, network drops, and device emulation) — not a generic click simulation — to deterministically reproduce the incident.
 
 ### 💬 6. Conversational QA Terminal Assistant (`loki chat`)
 * Launch an interactive terminal REPL connected to LOKI's AI Brain.

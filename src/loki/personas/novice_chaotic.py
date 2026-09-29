@@ -55,11 +55,15 @@ class NoviceChaoticPersona(BasePersona):
                         payload = self.get_random_payload()
                         input_id = input_elem.get_attribute("id") or input_elem.get_attribute("name") or "input"
                         self.log_action(f"Fuzzing '{input_id}' with payload: {payload[:20]}...")
+                        selector = self.resilient_selector(input_elem)
                         input_elem.fill(payload, timeout=500)
-                        
+
                         # Erratic keypress
                         key = random.choice(self.ERRATIC_KEYS)
                         input_elem.press(key)
+                        if selector:
+                            self.record_step("fill", selector=selector, value=payload)
+                            self.record_step("press", selector=selector, key=key)
                     except Exception as e:
                         self.log_action(f"Failed filling input: {str(e)}")
 
@@ -79,7 +83,10 @@ class NoviceChaoticPersona(BasePersona):
                     try:
                         btn_text = (btn.inner_text() or btn.get_attribute("value") or "button").strip()
                         self.log_action(f"Erratic submission click on '{btn_text}'")
+                        selector = self.resilient_selector(btn)
                         btn.click(timeout=500, no_wait_after=True, force=True)
+                        if selector:
+                            self.record_step("click", selector=selector, force=True)
                     except Exception as e:
                         self.log_action(f"Click on '{btn_text}' skipped: {str(e)}")
                     time.sleep(0.3)
@@ -103,8 +110,11 @@ class NoviceChaoticPersona(BasePersona):
                 if elem:
                     payload = self.get_random_payload()
                     self.log_action(f"Mutating recorded input on '{selector}' with chaos payload: {payload[:25]}...")
+                    key = random.choice(self.ERRATIC_KEYS)
                     elem.fill(payload, timeout=500)
-                    elem.press(random.choice(self.ERRATIC_KEYS))
+                    elem.press(key)
+                    self.record_step("fill", selector=selector, value=payload)
+                    self.record_step("press", selector=selector, key=key)
             except Exception as e:
                 self.log_action(f"Failed mutating input step on {selector}: {str(e)}")
 
@@ -114,7 +124,9 @@ class NoviceChaoticPersona(BasePersona):
                 if elem:
                     self.log_action(f"Executing erratic click on '{label}' ({selector})")
                     elem.click(timeout=300, no_wait_after=True, force=True)
+                    self.record_step("click", selector=selector, force=True)
                     # Smashing an erratic key right after click
                     page.keyboard.press("Escape")
+                    self.record_step("press", key="Escape")
             except Exception as e:
                 self.log_action(f"Erratic click on {selector} skipped: {str(e)}")

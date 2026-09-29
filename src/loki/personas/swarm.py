@@ -30,10 +30,12 @@ class SwarmPersona(BasePersona):
         self.sub_personas = [self.novice, self.adversary, self.network, self.rage]
 
     def _sync_logs(self, persona: BasePersona):
-        """Transfers recorded actions from a sub-persona to the swarm log."""
+        """Transfers recorded actions and replay trace from a sub-persona to the swarm."""
         for action in persona.actions_log:
             self.log_action(f"[{persona.name}] {action}")
         persona.actions_log.clear()
+        self.trace.extend(persona.trace)
+        persona.trace.clear()
 
     def attack(self, page: Page, duration: int):
         """Executes multi-persona assault waves until the duration limit is reached."""
