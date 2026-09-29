@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 import yaml
 
-DEFAULT_MODEL = "gemini/gemini-2.5-flash"
+DEFAULT_MODEL = "gemini/gemini-flash-latest"
 
 
 def load_loki_config() -> dict:

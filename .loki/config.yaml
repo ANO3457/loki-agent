@@ -8,4 +8,4 @@ chaos:
   click_burst_count: 5
 ai:
   provider: gemini
-  model: gemini-2.5-flash
+  model: gemini-flash-latest

@@ -85,7 +85,7 @@ Please provide your answer with the following structure:
         models_to_try = [
             model or resolve_model(),
             "gemini/gemini-flash-lite-latest",
-            "gemini/gemini-2.5-flash",
+            "gemini/gemini-3.6-flash",
             "gemini/gemini-3.5-flash-lite",
         ]
 
@@ -182,7 +182,7 @@ Respond ONLY with a valid JSON array of objects following this exact schema:
                 "observation": "No API key configured in environment."
             }]
 
-        models_to_try = [model or resolve_model(), "gemini/gemini-flash-latest"]
+        models_to_try = [model or resolve_model(), "gemini/gemini-flash-lite-latest"]
 
         last_error = "Unknown error"
         for m in models_to_try:

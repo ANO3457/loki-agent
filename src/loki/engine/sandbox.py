@@ -12,6 +12,7 @@ class IncidentReport:
     target_url: str
     persona_name: Optional[str] = None
     device_name: Optional[str] = None
+    device_requested: Optional[str] = None
     orientation: str = "portrait"
     crashes: List[str] = field(default_factory=list)
     console_errors: List[str] = field(default_factory=list)
@@ -165,7 +166,8 @@ class ChaosSandbox:
                 orientation=orientation,
                 devices=p.devices,
             )
-            report.device_name = resolved_device_name or device_name
+            report.device_requested = device_name
+            report.device_name = resolved_device_name
 
             try:
                 browser = p.chromium.launch(headless=self.headless)

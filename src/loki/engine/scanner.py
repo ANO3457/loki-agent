@@ -62,7 +62,7 @@ class ProjectScanner:
             },
             "ai": {
                 "provider": "gemini",
-                "model": "gemini-2.5-flash",
+                "model": "gemini-flash-latest",
             },
         }
         config_path = self.loki_dir / "config.yaml"

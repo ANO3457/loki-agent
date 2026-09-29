@@ -244,7 +244,7 @@ def run(
         console.print(f"[bold blue]🗺️ Guided Journey:[/bold blue] {journey_data.get('name')} ({journey_data.get('total_steps')} steps)")
     console.print(f"[bold magenta]🎭 Active Persona:[/bold magenta] {persona_label}")
     if device:
-        console.print(f"[bold green]📱 Emulated Device:[/bold green] {device} ({orientation})")
+        console.print(f"[bold green]📱 Requested Device:[/bold green] {device} ({orientation})")
 
     sandbox = ChaosSandbox(headless=target_config.get("headless", True) and not headed)
 
@@ -260,6 +260,12 @@ def run(
         )
 
     console.print(f"\n[bold green]✔ Attack session finished in {report.duration_seconds}s[/bold green]")
+    if device and not report.device_name:
+        console.print(
+            f"[bold yellow]⚠ Device alias '{device}' was not recognized — the session ran in the default "
+            f"desktop viewport instead of emulating a mobile device. Check the exact Playwright device name "
+            f"(e.g. 'iPhone 15', 'Pixel 7') or an alias documented in .agents/skills/loki-chaos/references/devices.md.[/bold yellow]"
+        )
     if report.actions_taken:
         console.print(f"\n[bold blue]📋 Actions executed ({len(report.actions_taken)}):[/bold blue]")
         for action in report.actions_taken[:5]:
