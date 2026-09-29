@@ -28,16 +28,18 @@ Every AI agent interacting with this repository MUST adhere to these non-negotia
 
 ---
 
-## 3. Autonomous Subagents Registry (`.agents/agents/`)
+## 3. Autonomous Subagents Registry (`.agents/agents/` and `.claude/agents/`)
 
-For specialized or compute-heavy tasks, agents can invoke or delegate to modular subagents defined in `.agents/agents/`:
+For specialized or compute-heavy tasks, agents can invoke or delegate to modular subagents. They are documented tool-agnostically in `.agents/agents/` (role, responsibilities, guidelines — read by any agent as reference context), and mirrored in `.claude/agents/` in the exact frontmatter Claude Code's own subagent registry expects, so its `Agent` tool auto-discovers them as `subagent_type` options in any new session opened on this repo:
 
 | Subagent | Role | Primary Use Cases | Model |
 | :--- | :--- | :--- | :---: |
 | **`chaos-tester`** | Chaos & Reproduction Specialist | Launching chaos sessions, mobile viewports (`--device`), testing horizontal overflows, deterministic replaying (`repro_test.py`). | `inherit` |
-| **`code-healer`** | Surgical Patch Synthesizer | Analyzing crash traces, creating `.loki.bak` backups, applying minimal AST-safe diffs, and verifying fixes with repro tests. | `pro` |
+| **`code-healer`** | Surgical Patch Synthesizer | Analyzing crash traces, creating `.loki.bak` backups, applying minimal AST-safe diffs, and verifying fixes with repro tests. | `pro` (`opus` in the Claude Code mirror) |
 | **`qa-auditor`** | Business Rules & CI Auditor | Evaluating `.loki/rules.md` business assertions, verifying CI/CD gate status, and checking GitHub Step Summaries. | `inherit` |
 | **`persona-architect`** | Mutation & Persona Engineer | Designing new chaos personas (`BasePersona`), tuning mutation rates, fuzzing strategies, and network throttling. | `inherit` |
+
+Other tools (Antigravity, Cursor, Windsurf, …) don't read `.claude/agents/` — for those, keep using `.agents/agents/` as the reference the agent loads manually, translating `tools:` to that tool's own vocabulary if it has native subagent support.
 
 ---
 
