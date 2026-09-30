@@ -68,7 +68,7 @@ On-demand procedures and runbooks are organized under `.agents/skills/` with pro
 
 ## 6. Core CLI Runbook
 
-**AI provider**: LOKI's AI Brain runs on LiteLLM, so it works with any LiteLLM-compatible provider — Gemini (bundled default), OpenAI, Anthropic, Mistral, Groq, Bedrock, a local Ollama/vLLM server, or any other OpenAI-compatible endpoint. Configure it under `ai:` in `.loki/config.yaml` (`model`, optional `api_base` for self-hosted/custom endpoints, optional `api_key_env` naming whichever env var holds the key) — see `src/loki/config.py`'s `resolve_ai_connection()`. Once customized, LOKI tries exactly that connection and never silently falls back to a different provider.
+**AI provider**: LOKI's AI Brain runs on LiteLLM, so it works with any LiteLLM-compatible provider — Gemini (bundled default), OpenAI, Anthropic, Mistral, Groq, Bedrock, a local Ollama/vLLM server, or any other OpenAI-compatible endpoint. Resolution order (see `src/loki/config.py`'s `resolve_ai_connection()`): an explicit `--model` flag > the active profile in `.loki/models.json` (managed from `loki chat`'s `/model` command) > `ai:` in `.loki/config.yaml` (`model`, optional `api_base`, optional `api_key_env`) > the bundled default. Once anything is customized past the default, LOKI tries exactly that connection and never silently falls back to a different provider.
 
 All commands are executed via Python module syntax using the project virtual environment:
 
@@ -110,9 +110,11 @@ $PYTHON = ".\.venv\Scripts\python.exe"
 &$PYTHON -m src.loki.cli replay                                        # Replay repro_test.py
 &$PYTHON -m src.loki.cli replay --video                                # Launch recorded failure video
 
-# 7. Conversational QA terminal REPL
+# 7. Conversational QA terminal REPL — the default screen (bare `loki` launches it too)
 &$PYTHON -m src.loki.cli chat
 &$PYTHON -m src.loki.cli chat --model gemini/gemini-3.5-flash-lite
+# Inside chat: /model lists/switches/adds AI model profiles (.loki/models.json),
+# applied immediately to chat, rules evaluation, fix, and auto-heal alike.
 ```
 
 ---

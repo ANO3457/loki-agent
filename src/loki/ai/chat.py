@@ -6,7 +6,18 @@ from typing import List, Dict, Any, Optional
 import litellm
 litellm.suppress_debug_info = True
 
-from src.loki.config import is_ai_customized, resolve_ai_connection, resolve_model
+from src.loki.config import (
+    activate_model_profile,
+    add_model_profile,
+    clear_active_model_profile,
+    get_active_model_profile,
+    is_ai_customized,
+    list_model_profiles,
+    model_source,
+    remove_model_profile,
+    resolve_ai_connection,
+    resolve_model,
+)
 
 from rich.console import Console
 from rich.panel import Panel
@@ -133,6 +144,106 @@ class LokiChatSession:
             return
         self.console.print(Panel(rules_file.read_text(encoding="utf-8"), title="📋 Active Business Rules", border_style="cyan"))
 
+    def _show_model_status(self):
+        """Displays the current effective model, where it came from, and saved profiles."""
+        current = resolve_model(self._explicit_model)
+        source = model_source(self._explicit_model)
+        profiles = list_model_profiles()
+        active = get_active_model_profile()
+        active_name = active["name"] if active else None
+
+        lines = [f"[bold white]Current model:[/bold white] [cyan]{current}[/cyan] [dim]({source})[/dim]", ""]
+        if profiles:
+            lines.append("[bold white]Saved profiles:[/bold white]")
+            for p in profiles:
+                marker = "[bold green]▸[/bold green]" if p.get("name") == active_name else " "
+                extra = "".join(
+                    f" [dim]{k}={v}[/dim]" for k, v in (("api_base", p.get("api_base")), ("api_key_env", p.get("api_key_env"))) if v
+                )
+                lines.append(f"  {marker} [bold]{p['name']}[/bold] → {p['model']}{extra}")
+        else:
+            lines.append("[dim]No saved profiles yet — every LOKI AI feature (chat, rules, fix) is reading straight from .loki/config.yaml.[/dim]")
+
+        lines.extend([
+            "",
+            "[bold white]Commands:[/bold white]",
+            "  [cyan]/model <name>[/cyan]                     — switch to a saved profile",
+            "  [cyan]/model add <name> <model-id> [api_base=...] [api_key_env=...][/cyan] — save & switch",
+            "  [cyan]/model remove <name>[/cyan]              — delete a saved profile",
+            "  [cyan]/model reset[/cyan]                       — revert to .loki/config.yaml's default",
+            "",
+            "[dim]e.g. /model add local ollama/llama3[/dim]",
+            "[dim]e.g. /model add work mistral/mistral-large-latest api_key_env=MISTRAL_API_KEY[/dim]",
+        ])
+        self.console.print(Panel("\n".join(lines), title="🧠 AI Model", border_style="cyan"))
+
+    def _handle_model_command(self, args: str):
+        """Parses and executes a `/model ...` command, switching every LOKI AI
+        feature (chat, rules evaluation, fix, auto-heal) to the chosen connection."""
+        parts = args.split()
+        if not parts:
+            self._show_model_status()
+            return
+
+        sub = parts[0].lower()
+
+        if sub == "add":
+            if len(parts) < 3:
+                self.console.print("[yellow]Usage: /model add <name> <model-id> [api_base=<url>] [api_key_env=<VAR>][/yellow]")
+                return
+            name, model_id = parts[1], parts[2]
+            api_base, api_key_env = None, None
+            for token in parts[3:]:
+                if token.startswith("api_base="):
+                    api_base = token.split("=", 1)[1]
+                elif token.startswith("api_key_env="):
+                    api_key_env = token.split("=", 1)[1]
+            add_model_profile(name, model_id, api_base=api_base, api_key_env=api_key_env)
+            activate_model_profile(name)
+            self._explicit_model = None
+            self.model = resolve_model(None)
+            self.console.print(f"[bold green]✔ Saved and switched to profile '{name}' → {model_id}[/bold green]")
+            return
+
+        if sub == "remove":
+            if len(parts) < 2:
+                self.console.print("[yellow]Usage: /model remove <name>[/yellow]")
+                return
+            name = parts[1]
+            if remove_model_profile(name):
+                self._explicit_model = None
+                self.model = resolve_model(None)
+                self.console.print(f"[green]✔ Removed profile '{name}'. Now using: {self.model}[/green]")
+            else:
+                self.console.print(f"[yellow]No profile named '{name}' found.[/yellow]")
+            return
+
+        if sub in ("reset", "default"):
+            clear_active_model_profile()
+            self._explicit_model = None
+            self.model = resolve_model(None)
+            self.console.print(f"[green]✔ Reverted to .loki/config.yaml's default: {self.model}[/green]")
+            return
+
+        # Otherwise: treat the argument as a profile name to switch to
+        name = parts[0]
+        profile = activate_model_profile(name)
+        if not profile and "/" in name:
+            # Looks like a bare "provider/model" id rather than a saved profile name
+            # — add it under its own name so it's there next time too.
+            add_model_profile(name, name)
+            profile = activate_model_profile(name)
+        if not profile:
+            self.console.print(
+                f"[yellow]No saved profile named '{name}'.[/yellow] "
+                f"Use [bold]/model add {name} <model-id>[/bold] to create it, or [bold]/model[/bold] to see what's saved."
+            )
+            return
+
+        self._explicit_model = None
+        self.model = resolve_model(None)
+        self.console.print(f"[bold green]✔ Switched active model to '{profile['name']}' → {profile['model']}[/bold green]")
+
     def start(self):
         """Launches the interactive REPL chat session."""
         self.console.print(
@@ -147,7 +258,7 @@ class LokiChatSession:
 [bold white]Interactive AI QA & Chaos Testing Assistant[/bold white]
 [dim]Powered by LiteLLM ({self.model})[/dim]
 
-[cyan]Commands:[/cyan] [bold]/help[/bold] (commands), [bold]/runs[/bold] (list runs), [bold]/rules[/bold] (view rules), [bold]/clear[/bold] (clear screen), [bold]exit[/bold] (quit)""",
+[cyan]Commands:[/cyan] [bold]/help[/bold] (commands), [bold]/model[/bold] (switch AI model), [bold]/runs[/bold] (list runs), [bold]/rules[/bold] (view rules), [bold]/clear[/bold] (clear screen), [bold]exit[/bold] (quit)""",
                 border_style="red",
             )
         )
@@ -185,6 +296,7 @@ Project & Testing Context:
             if cmd_lower == "/help":
                 self.console.print(
                     Panel(
+                        "• [bold cyan]/model[/bold cyan] — View, switch, or add AI models (e.g. /model add local ollama/llama3)\n"
                         "• [bold cyan]/runs[/bold cyan] — List recent test runs, crashes, and report files\n"
                         "• [bold cyan]/rules[/bold cyan] — Display active business rules from .loki/rules.md\n"
                         "• [bold cyan]/clear[/bold cyan] — Clear terminal screen\n"
@@ -194,6 +306,10 @@ Project & Testing Context:
                         border_style="cyan",
                     )
                 )
+                continue
+
+            if cmd_lower == "/model" or cmd_lower.startswith("/model "):
+                self._handle_model_command(user_input[len("/model"):].strip())
                 continue
 
             if cmd_lower == "/runs":
@@ -230,6 +346,7 @@ Project & Testing Context:
             ]
 
             success = False
+            reported_error = False
             for kwargs in attempts:
                 try:
                     with Status(f"[bold yellow]LOKI is thinking...[/bold yellow]", console=self.console):
@@ -275,7 +392,8 @@ Project & Testing Context:
                         continue
                     else:
                         self.console.print(f"\n[bold red]AI Error:[/bold red] {e}")
+                        reported_error = True
                         break
 
-            if not success:
+            if not success and not reported_error:
                 self.console.print("\n[bold red]AI Error:[/bold red] Service currently experiencing high demand. Please try again in a moment.")

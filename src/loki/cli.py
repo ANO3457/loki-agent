@@ -57,26 +57,9 @@ class PersonaChoice(str, Enum):
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
-    """Main entry point for LOKI."""
+    """Main entry point for LOKI. With no subcommand, launches the interactive chat."""
     if ctx.invoked_subcommand is None:
-        banner = r"""
-[bold red]  _       ____  _  __ _____ [/bold red]
-[bold red] | |     / __ \| |/ /|_   _|[/bold red]
-[bold yellow] | |    | |  | | ' /   | |  [/bold yellow]
-[bold yellow] | |    | |  | |  <    | |  [/bold yellow]
-[bold green] | |____| |__| | . \  _| |_ [/bold green]
-[bold green] |______|\____/|_|\_\|_____|[/bold green]
-        """
-        console.print(banner)
-        console.print(
-            Panel(
-                "[bold white]Welcome to LOKI's Chaos Realm.[/bold white]\n\n"
-                "[dim]Autonomous agent simulating hostile users and breaking your software before production.[/dim]\n\n"
-                "Run [bold cyan]python -m src.loki.cli --help[/bold cyan] to see available commands.",
-                title=f"[bold yellow]⚡ LOKI Agent v{__version__}[/bold yellow]",
-                border_style="red",
-            )
-        )
+        chat(model=None)
 
 @app.command()
 def version():

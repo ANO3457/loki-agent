@@ -59,9 +59,10 @@ At the end of an assault session, LOKI's AI Brain (model set in `.loki/config.ya
 * Opens N independent, synchronized browser lanes that fire the same action at the same instant, hunting for server-side race conditions (double charges, oversold inventory) that a single tab's sequential click bursts cannot trigger.
 * Flags evidence like multiple lanes both getting a successful response for a one-time action, and ships its own dedicated `repro_test.py` that replays the synchronized race deterministically.
 
-### 💬 7. Conversational QA Terminal Assistant (`loki chat`)
-* Launch an interactive terminal REPL connected to LOKI's AI Brain.
+### 💬 7. Conversational QA Terminal Assistant (`loki chat`) — the default screen
+* Running bare `loki` (no subcommand) drops you straight into this REPL — it's the central control surface for the whole agent, not just a Q&A window.
 * Chat about recent runs, analyze crash traces, inspect rules, and receive actionable refactoring suggestions directly in your console.
+* `/model` lists, switches, and adds AI model profiles on the fly (e.g. `/model add local ollama/llama3`) — the choice applies immediately, in that same session, to *every* LOKI AI feature (chat, rules evaluation, `fix`, auto-heal), not just chat, since it's saved to `.loki/models.json` and read from there first.
 
 ### 🛡️ 8. Strict CI/CD Quality Gate
 * Seamlessly integrates into GitHub Actions, GitLab CI, or pre-commit pipelines (`--ci`, `--strict`).
@@ -172,7 +173,8 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki fix` | Diagnose latest captured crash with AI reasoning and generate code patch |
 | `loki fix --apply` | Synthesize surgical patch, apply to code, and verify with repro test |
 | `loki replay` | Deterministically replay captured incident or open video (`--video`) |
-| `loki chat` | Launch conversational QA terminal assistant REPL |
+| `loki` / `loki chat` | Launch conversational QA terminal assistant REPL (the default screen) |
+| `loki chat` then `/model` | List, switch, or add AI model profiles (any LiteLLM provider, incl. local Ollama) |
 
 ---
 
