@@ -1,13 +1,11 @@
 import json
-import os
-import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import litellm
 litellm.suppress_debug_info = True
 from src.loki.engine.sandbox import IncidentReport
 from src.loki.engine.healer import CodeHealer
-from src.loki.config import resolve_model
+from src.loki.config import is_ai_customized, resolve_ai_connection
 
 
 class AIBrain:
@@ -68,36 +66,27 @@ Please provide your answer with the following structure:
 3. **Recommended Fix**: Provide the exact code diff or corrected code snippet to prevent this failure (e.g. debouncing, disabling button, idempotency lock).
 """
 
-        # Check if an API key is available in environment
-        has_api_key = any(k in os.environ for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
-
-        if not has_api_key:
-            return {
-                "run_id": target_dir.name,
-                "incident": incident_data,
-                "diagnosis": (
-                    "⚠ **No LLM API key detected** (GEMINI_API_KEY, OPENAI_API_KEY, etc.).\n\n"
-                    + self._local_diagnosis(incident_data, source_file)
-                    + "\n\n_Tip: Set `GEMINI_API_KEY` in your environment to enable real-time dynamic AI diagnosis._"
-                ),
-            }
-
-        models_to_try = [
-            model or resolve_model(),
-            "gemini/gemini-flash-lite-latest",
-            "gemini/gemini-3.6-flash",
-            "gemini/gemini-3.5-flash-lite",
+        # Any LiteLLM-compatible provider works here — not just Gemini/OpenAI/Anthropic.
+        # Only the bundled Gemini default gets extra sibling-model fallbacks: once the
+        # user has pointed `ai:` (or --model) at something else, try exactly that and
+        # nothing else, so we never silently fall back to a provider they didn't ask for.
+        customized = is_ai_customized(model)
+        base_kwargs = resolve_ai_connection(model)
+        attempts = [base_kwargs] if customized else [
+            base_kwargs,
+            {**base_kwargs, "model": "gemini/gemini-flash-lite-latest"},
+            {**base_kwargs, "model": "gemini/gemini-3.6-flash"},
+            {**base_kwargs, "model": "gemini/gemini-3.5-flash-lite"},
         ]
 
-        last_error = "Unknown error"
-        for m in models_to_try:
+        last_error: Optional[Exception] = None
+        for kwargs in attempts:
             try:
-                # Query the model using LiteLLM
                 response = litellm.completion(
-                    model=m,
                     messages=[{"role": "user", "content": prompt}],
                     timeout=25,
                     num_retries=1,
+                    **kwargs,
                 )
                 analysis = response.choices[0].message.content
                 return {
@@ -106,17 +95,26 @@ Please provide your answer with the following structure:
                     "diagnosis": analysis,
                 }
             except Exception as e:
-                last_error = str(e)
+                last_error = e
                 continue
 
-        # If all cloud models are unavailable (e.g. 503 spikes), provide deterministic diagnosis
+        # Every attempt failed (missing/invalid key, unreachable endpoint, provider
+        # outage...) — fall back to a deterministic diagnosis built only from evidence.
+        hint = (
+            "Check the connection configured under `ai:` in `.loki/config.yaml` "
+            "(model, api_base, api_key_env)."
+            if customized else
+            "Set `GEMINI_API_KEY`, or configure `ai:` in `.loki/config.yaml` to point at "
+            "any other LiteLLM-compatible provider (OpenAI, Anthropic, Mistral, Groq, a "
+            "local Ollama/vLLM server, or any OpenAI-compatible endpoint via `api_base`)."
+        )
         return {
             "run_id": target_dir.name,
             "incident": incident_data,
             "diagnosis": (
-                "⚠ **Cloud AI models unavailable. Activated local diagnosis:**\n\n"
+                f"⚠ **AI call failed** ({last_error}). Activated local diagnosis:\n\n"
                 + self._local_diagnosis(incident_data, source_file)
-                + f"\n\n_(Original error: {last_error})_"
+                + f"\n\n_Tip: {hint}_"
             ),
         }
 
@@ -174,38 +172,33 @@ Respond ONLY with a valid JSON array of objects following this exact schema:
   }}
 ]
 """
-        has_api_key = any(k in os.environ for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
-        if not has_api_key:
-            return [{
-                "rule": "Business Rules Evaluation",
-                "status": "SKIPPED",
-                "observation": "No API key configured in environment."
-            }]
+        customized = is_ai_customized(model)
+        base_kwargs = resolve_ai_connection(model)
+        attempts = [base_kwargs] if customized else [base_kwargs, {**base_kwargs, "model": "gemini/gemini-flash-lite-latest"}]
 
-        models_to_try = [model or resolve_model(), "gemini/gemini-flash-lite-latest"]
-
-        last_error = "Unknown error"
-        for m in models_to_try:
-            for attempt in range(2):
-                try:
-                    response = litellm.completion(
-                        model=m,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.1,
-                    )
-                    raw = response.choices[0].message.content.strip()
-                    # Clean possible markdown formatting
-                    if raw.startswith("```"):
-                        lines = raw.split("\n")
-                        if lines[0].startswith("```"):
-                            lines = lines[1:]
-                        if lines and lines[-1].startswith("```"):
-                            lines = lines[:-1]
-                        raw = "\n".join(lines).strip()
-                    return json.loads(raw)
-                except Exception as e:
-                    last_error = str(e)
-                    time.sleep(1.0)
+        last_error: Optional[Exception] = None
+        for kwargs in attempts:
+            try:
+                response = litellm.completion(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    timeout=25,
+                    num_retries=1,
+                    **kwargs,
+                )
+                raw = response.choices[0].message.content.strip()
+                # Clean possible markdown formatting
+                if raw.startswith("```"):
+                    lines = raw.split("\n")
+                    if lines[0].startswith("```"):
+                        lines = lines[1:]
+                    if lines and lines[-1].startswith("```"):
+                        lines = lines[:-1]
+                    raw = "\n".join(lines).strip()
+                return json.loads(raw)
+            except Exception as e:
+                last_error = e
+                continue
 
         return [{
             "rule": "Business Rules Evaluation Error",

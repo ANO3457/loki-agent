@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 import litellm
 litellm.suppress_debug_info = True
 
-from src.loki.config import resolve_model
+from src.loki.config import is_ai_customized, resolve_ai_connection, resolve_model
 
 from rich.console import Console
 from rich.panel import Panel
@@ -19,6 +19,7 @@ class LokiChatSession:
     """Interactive conversational terminal REPL for pair QA testing, incident queries, and advice."""
 
     def __init__(self, model: Optional[str] = None, runs_dir: str = ".loki/runs"):
+        self._explicit_model = model
         self.model = resolve_model(model)
         self.runs_dir = Path(runs_dir)
         self.console = Console()
@@ -216,22 +217,28 @@ Project & Testing Context:
                 # Keep system prompt at index 0, take last 10 messages
                 active_messages = [self.history[0]] + self.history[-10:]
 
-            # Models to attempt with fallback if 503 high demand occurs
-            candidate_models = [self.model]
-            for fallback in ["gemini/gemini-3.6-flash", "gemini/gemini-flash-lite-latest", "gemini/gemini-3.5-flash-lite"]:
-                if fallback not in candidate_models:
-                    candidate_models.append(fallback)
+            # Any LiteLLM-compatible provider works here, not just Gemini/OpenAI/Anthropic.
+            # Sibling-model fallbacks (for transient "high demand" errors) only apply to
+            # LOKI's own bundled Gemini default — once the user configured `ai:` or
+            # --model, try exactly that and nothing else.
+            base_kwargs = resolve_ai_connection(self._explicit_model)
+            attempts = [base_kwargs] if is_ai_customized(self._explicit_model) else [
+                base_kwargs,
+                {**base_kwargs, "model": "gemini/gemini-3.6-flash"},
+                {**base_kwargs, "model": "gemini/gemini-flash-lite-latest"},
+                {**base_kwargs, "model": "gemini/gemini-3.5-flash-lite"},
+            ]
 
             success = False
-            for target_model in candidate_models:
+            for kwargs in attempts:
                 try:
                     with Status(f"[bold yellow]LOKI is thinking...[/bold yellow]", console=self.console):
                         stream_response = litellm.completion(
-                            model=target_model,
                             messages=active_messages,
                             stream=True,
                             timeout=25,
                             num_retries=1,
+                            **kwargs,
                         )
                         # Read first token inside the status spinner to ensure response has started
                         first_chunk = ""

@@ -109,7 +109,7 @@ pip install -e .
 ```
 
 ### 2. Configure AI Brain (Optional for AI features)
-Export your preferred LLM API key (Google Gemini, OpenAI, or Anthropic):
+LOKI's AI Brain runs on [LiteLLM](https://docs.litellm.ai/docs/providers), so it can talk to **any** LiteLLM-compatible provider — not just Gemini, OpenAI, or Anthropic. For the bundled default, export a Gemini key:
 ```bash
 # Windows PowerShell
 $env:GEMINI_API_KEY="your-gemini-api-key"
@@ -117,6 +117,20 @@ $env:GEMINI_API_KEY="your-gemini-api-key"
 # Linux / macOS
 export GEMINI_API_KEY="your-gemini-api-key"
 ```
+
+To use a different provider (Mistral, Groq, Cohere, Azure, Bedrock, a local Ollama/vLLM/LM Studio server, or any other OpenAI-compatible endpoint), set `ai:` in `.loki/config.yaml`:
+```yaml
+ai:
+  provider: mistral                # optional: prefixes `model` when it has no "/"
+  model: mistral-large-latest      # any LiteLLM model id ("provider/model"), or a
+                                    # bare name when pointing at a custom api_base
+  api_base: https://my-host/v1     # optional: a self-hosted or OpenAI-compatible
+                                    # server (Ollama, vLLM, LM Studio, an internal
+                                    # gateway...) — needs no public API key at all
+  api_key_env: MY_PROVIDER_KEY     # optional: the env var holding the key, when it
+                                    # doesn't match the provider's usual name
+```
+Once `ai:` (or `--model`) points anywhere other than the bundled Gemini default, LOKI tries exactly that connection — it never silently falls back to a different provider.
 
 ### 3. Initialize Workspace
 Analyze your target project and generate `.loki/` configuration:

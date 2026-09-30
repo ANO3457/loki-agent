@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import shutil
 import sys
@@ -11,7 +10,7 @@ import litellm
 litellm.suppress_debug_info = True
 
 from src.loki.engine.replayer import IncidentReplayer
-from src.loki.config import resolve_model
+from src.loki.config import is_ai_customized, resolve_ai_connection
 
 
 class CodeHealer:
@@ -76,20 +75,7 @@ class CodeHealer:
             }
 
         source_code = target_file.read_text(encoding="utf-8")
-        model = model or resolve_model()
         crashes = incident_data.get("crashes", [])
-
-        # Check for API key
-        has_api_key = any(k in os.environ for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
-        if not has_api_key:
-            # Deterministic fallback for common playground race condition
-            fallback = self._playground_fallback_patch(target_file, source_code)
-            if fallback:
-                return fallback
-            return {
-                "success": False,
-                "error": "No LLM API key detected in environment (GEMINI_API_KEY, OPENAI_API_KEY).",
-            }
 
         prompt = f"""You are LOKI's Autonomous Code Self-Healing Engine.
 A real-world chaos test crashed the target web application.
@@ -118,15 +104,24 @@ Instructions:
 Do NOT output any markdown formatting or commentary outside the JSON.
 """
 
-        candidate_models = [model, "gemini/gemini-flash-lite-latest", "gemini/gemini-3.5-flash-lite"]
-        for candidate in candidate_models:
+        # Any LiteLLM-compatible provider works here, not just Gemini/OpenAI/Anthropic.
+        # Once the user has customized `ai:` (or passed --model), try exactly that and
+        # nothing else — never silently swap in a provider they didn't configure.
+        customized = is_ai_customized(model)
+        base_kwargs = resolve_ai_connection(model)
+        attempts = [base_kwargs] if customized else [
+            base_kwargs,
+            {**base_kwargs, "model": "gemini/gemini-flash-lite-latest"},
+            {**base_kwargs, "model": "gemini/gemini-3.5-flash-lite"},
+        ]
+        for kwargs in attempts:
             try:
                 response = litellm.completion(
-                    model=candidate,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
                     timeout=30,
                     num_retries=1,
+                    **kwargs,
                 )
                 raw_text = response.choices[0].message.content or ""
                 # Strip markdown code blocks if wrapped

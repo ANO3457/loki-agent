@@ -68,6 +68,8 @@ On-demand procedures and runbooks are organized under `.agents/skills/` with pro
 
 ## 6. Core CLI Runbook
 
+**AI provider**: LOKI's AI Brain runs on LiteLLM, so it works with any LiteLLM-compatible provider — Gemini (bundled default), OpenAI, Anthropic, Mistral, Groq, Bedrock, a local Ollama/vLLM server, or any other OpenAI-compatible endpoint. Configure it under `ai:` in `.loki/config.yaml` (`model`, optional `api_base` for self-hosted/custom endpoints, optional `api_key_env` naming whichever env var holds the key) — see `src/loki/config.py`'s `resolve_ai_connection()`. Once customized, LOKI tries exactly that connection and never silently falls back to a different provider.
+
 All commands are executed via Python module syntax using the project virtual environment:
 
 ```powershell
