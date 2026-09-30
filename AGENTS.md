@@ -115,6 +115,9 @@ $PYTHON = ".\.venv\Scripts\python.exe"
 &$PYTHON -m src.loki.cli chat --model gemini/gemini-3.5-flash-lite
 # Inside chat: /model lists/switches/adds AI model profiles (.loki/models.json),
 # applied immediately to chat, rules evaluation, fix, and auto-heal alike.
+# Inside chat: /run, /fix, /report call the same run()/fix()/report() functions
+# as the standalone CLI commands directly (see src/loki/ai/chat.py's
+# _run_cli_action) — no separate reimplementation to keep in sync.
 ```
 
 ---

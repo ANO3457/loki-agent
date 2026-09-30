@@ -2,7 +2,8 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
+import typer
 import litellm
 litellm.suppress_debug_info = True
 
@@ -281,6 +282,187 @@ class LokiChatSession:
         self.model = resolve_model(None)
         self.console.print(f"[bold green]✔ Switched active model to '{profile['name']}' → {profile['model']}[/bold green]")
 
+    def _run_cli_action(self, description: str, fn: Callable, **kwargs):
+        """Invokes a `loki` CLI command function directly — bypassing Click/Typer's own
+        argument parsing — so /run, /fix, and /report drive the exact same code path as
+        the standalone CLI commands, instead of a separate reimplementation. A command
+        function's own `typer.Exit(code=...)` is treated as a normal, expected ending
+        (it's how e.g. the --ci gate signals pass/fail), not an error; anything else
+        unexpected is reported without killing the chat session."""
+        try:
+            fn(**kwargs)
+        except typer.Exit as e:
+            if e.exit_code not in (0, None):
+                self.console.print(f"[dim]({description} finished with exit code {e.exit_code})[/dim]")
+        except Exception as e:
+            self.console.print(f"[bold red]Error running {description}:[/bold red] {e}")
+
+    def _handle_run_command(self, args: str):
+        """Parses `/run [url] [flags]` and launches a real chaos session via the same
+        `run()` used by `loki run`, without leaving the chat."""
+        from src.loki.cli import PersonaChoice, run as cli_run
+
+        tokens = args.split()
+        url = None
+        persona_raw = None
+        kwargs: Dict[str, Any] = dict(
+            duration=None, headed=False, swarm=False, journey=None,
+            rules=True, report_html=True, open_report=False, ci=False,
+            strict=False, auto_heal=False, device=None, orientation="portrait",
+            concurrency=1, target_selector=None,
+        )
+
+        i = 0
+        while i < len(tokens):
+            t = tokens[i]
+            low = t.lower()
+
+            def _next_value() -> Optional[str]:
+                nonlocal i
+                if i + 1 >= len(tokens):
+                    self.console.print(f"[yellow]Missing value after {t}[/yellow]")
+                    return None
+                i += 1
+                return tokens[i]
+
+            if low in ("-d", "--duration"):
+                v = _next_value()
+                if v is None:
+                    return
+                try:
+                    kwargs["duration"] = int(v)
+                except ValueError:
+                    self.console.print(f"[yellow]--duration expects a number, got '{v}'[/yellow]")
+                    return
+            elif low in ("-p", "--persona"):
+                v = _next_value()
+                if v is None:
+                    return
+                persona_raw = v
+            elif low in ("-j", "--journey"):
+                v = _next_value()
+                if v is None:
+                    return
+                kwargs["journey"] = v
+            elif low in ("-m", "--device"):
+                v = _next_value()
+                if v is None:
+                    return
+                kwargs["device"] = v
+            elif low == "--orientation":
+                v = _next_value()
+                if v is None:
+                    return
+                kwargs["orientation"] = v
+            elif low in ("-c", "--concurrency"):
+                v = _next_value()
+                if v is None:
+                    return
+                try:
+                    kwargs["concurrency"] = int(v)
+                except ValueError:
+                    self.console.print(f"[yellow]--concurrency expects a number, got '{v}'[/yellow]")
+                    return
+            elif low == "--target-selector":
+                v = _next_value()
+                if v is None:
+                    return
+                kwargs["target_selector"] = v
+            elif low == "--headed":
+                kwargs["headed"] = True
+            elif low in ("-s", "--swarm"):
+                kwargs["swarm"] = True
+            elif low in ("-r", "--rules"):
+                kwargs["rules"] = True
+            elif low in ("-nr", "--no-rules"):
+                kwargs["rules"] = False
+            elif low == "--report":
+                kwargs["report_html"] = True
+            elif low == "--no-report":
+                kwargs["report_html"] = False
+            elif low in ("-o", "--open"):
+                kwargs["open_report"] = True
+            elif low == "--ci":
+                kwargs["ci"] = True
+            elif low == "--strict":
+                kwargs["strict"] = True
+            elif low in ("-H", "--auto-heal"):
+                kwargs["auto_heal"] = True
+            elif not t.startswith("-") and url is None:
+                url = t
+            else:
+                self.console.print(f"[yellow]Unknown /run option: {t}[/yellow]")
+                return
+            i += 1
+
+        persona = None
+        if persona_raw:
+            try:
+                persona = PersonaChoice(persona_raw.lower())
+            except ValueError:
+                valid = ", ".join(p.value for p in PersonaChoice)
+                self.console.print(f"[yellow]Unknown persona '{persona_raw}'. Valid options: {valid}[/yellow]")
+                return
+
+        self._run_cli_action("loki run", cli_run, url=url, persona=persona, **kwargs)
+
+    def _handle_fix_command(self, args: str):
+        """Parses `/fix [run_id] [flags]` and runs the same diagnosis/patch flow as `loki fix`."""
+        from src.loki.cli import fix as cli_fix
+
+        tokens = args.split()
+        run_id = None
+        apply_, yes, verify, model = False, False, True, None
+
+        i = 0
+        while i < len(tokens):
+            t = tokens[i]
+            low = t.lower()
+            if low in ("-a", "--apply"):
+                apply_ = True
+            elif low in ("-y", "--yes"):
+                yes = True
+            elif low == "--no-verify":
+                verify = False
+            elif low == "--verify":
+                verify = True
+            elif low in ("-m", "--model"):
+                if i + 1 >= len(tokens):
+                    self.console.print(f"[yellow]Missing value after {t}[/yellow]")
+                    return
+                i += 1
+                model = tokens[i]
+            elif not t.startswith("-") and run_id is None:
+                run_id = t
+            else:
+                self.console.print(f"[yellow]Unknown /fix option: {t}[/yellow]")
+                return
+            i += 1
+
+        self._run_cli_action("loki fix", cli_fix, run_id=run_id, apply=apply_, yes=yes, verify=verify, model=model)
+
+    def _handle_report_command(self, args: str):
+        """Parses `/report [run_id] [--no-open]` and opens/generates the HTML report,
+        same as `loki report`."""
+        from src.loki.cli import report as cli_report
+
+        tokens = args.split()
+        run_id = None
+        open_browser = True
+        for t in tokens:
+            low = t.lower()
+            if low == "--no-open":
+                open_browser = False
+            elif low in ("-o", "--open"):
+                open_browser = True
+            elif not t.startswith("-") and run_id is None:
+                run_id = t
+            else:
+                self.console.print(f"[yellow]Unknown /report option: {t}[/yellow]")
+                return
+
+        self._run_cli_action("loki report", cli_report, run_id=run_id, open_browser=open_browser)
+
     def _build_completer(self) -> NestedCompleter:
         """Builds a fresh Tab/as-you-type completer, including saved /model profile names."""
         profile_names = [p["name"] for p in list_model_profiles()]
@@ -293,6 +475,12 @@ class LokiChatSession:
         })
         return _SlashNestedCompleter.from_nested_dict({
             "/model": model_targets,
+            "/run": {
+                "--persona": None, "--swarm": None, "--device": None, "--journey": None,
+                "--concurrency": None, "--auto-heal": None, "--headed": None, "--no-rules": None,
+            },
+            "/fix": {"--apply": None, "--yes": None, "--no-verify": None, "--model": None},
+            "/report": {"--no-open": None},
             "/runs": None,
             "/rules": None,
             "/help": None,
@@ -432,6 +620,9 @@ Project & Testing Context:
             if cmd_lower == "/help":
                 self.console.print(
                     Panel(
+                        "• [bold cyan]/run [url] [flags][/bold cyan] — Launch a real chaos attack (same flags as `loki run`), without leaving chat\n"
+                        "• [bold cyan]/fix [run_id] [--apply][/bold cyan] — Diagnose (and optionally patch) the latest or a specific incident\n"
+                        "• [bold cyan]/report [run_id][/bold cyan] — Open or generate a run's HTML report\n"
                         "• [bold cyan]/model[/bold cyan] — View, switch, or add AI models (e.g. /model add local ollama/llama3)\n"
                         "• [bold cyan]/runs[/bold cyan] — List recent test runs, crashes, and report files\n"
                         "• [bold cyan]/rules[/bold cyan] — Display active business rules from .loki/rules.md\n"
@@ -446,6 +637,18 @@ Project & Testing Context:
 
             if cmd_lower == "/model" or cmd_lower.startswith("/model "):
                 self._handle_model_command(user_input[len("/model"):].strip())
+                continue
+
+            if cmd_lower == "/run" or cmd_lower.startswith("/run "):
+                self._handle_run_command(user_input[len("/run"):].strip())
+                continue
+
+            if cmd_lower == "/fix" or cmd_lower.startswith("/fix "):
+                self._handle_fix_command(user_input[len("/fix"):].strip())
+                continue
+
+            if cmd_lower == "/report" or cmd_lower.startswith("/report "):
+                self._handle_report_command(user_input[len("/report"):].strip())
                 continue
 
             if cmd_lower == "/runs":

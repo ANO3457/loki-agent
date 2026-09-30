@@ -63,6 +63,7 @@ At the end of an assault session, LOKI's AI Brain (model set in `.loki/config.ya
 * Running bare `loki` (no subcommand) drops you straight into this REPL — it's the central control surface for the whole agent, not just a Q&A window.
 * Chat about recent runs, analyze crash traces, inspect rules, and receive actionable refactoring suggestions directly in your console.
 * `/model` lists, switches, and adds AI model profiles on the fly (e.g. `/model add local ollama/llama3`) — the choice applies immediately, in that same session, to *every* LOKI AI feature (chat, rules evaluation, `fix`, auto-heal), not just chat, since it's saved to `.loki/models.json` and read from there first.
+* `/run [url] [flags]`, `/fix [run_id] [--apply]`, and `/report [run_id]` drive the exact same code as their standalone CLI commands — launch an attack, diagnose or patch an incident, or open a report, all without leaving the chat.
 
 ### 🛡️ 8. Strict CI/CD Quality Gate
 * Seamlessly integrates into GitHub Actions, GitLab CI, or pre-commit pipelines (`--ci`, `--strict`).
