@@ -5,5 +5,6 @@ playwright>=1.45.0
 pyyaml>=6.0.1
 litellm>=1.40.0
 pillow>=10.0.0
+prompt_toolkit>=3.0.36
 pyinstaller>=6.0.0
 tenacity>=8.2.0

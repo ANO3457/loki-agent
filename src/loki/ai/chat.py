@@ -25,6 +25,9 @@ from rich.table import Table
 from rich.markdown import Markdown
 from rich.status import Status
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import NestedCompleter
+
 
 class LokiChatSession:
     """Interactive conversational terminal REPL for pair QA testing, incident queries, and advice."""
@@ -35,6 +38,8 @@ class LokiChatSession:
         self.runs_dir = Path(runs_dir)
         self.console = Console()
         self.history: List[Dict[str, str]] = []
+        self._prompt_session: Optional[PromptSession] = None
+        self._use_boxed_prompt = True
 
     def _load_project_context(self) -> str:
         """Assembles repository context: config, rules, and knowledge."""
@@ -244,6 +249,67 @@ class LokiChatSession:
         self.model = resolve_model(None)
         self.console.print(f"[bold green]✔ Switched active model to '{profile['name']}' → {profile['model']}[/bold green]")
 
+    def _build_completer(self) -> NestedCompleter:
+        """Builds a fresh Tab/as-you-type completer, including saved /model profile names."""
+        profile_names = [p["name"] for p in list_model_profiles()]
+        model_targets: Dict[str, Any] = {name: None for name in profile_names}
+        model_targets.update({
+            "add": None,
+            "remove": {name: None for name in profile_names} if profile_names else None,
+            "reset": None,
+            "default": None,
+        })
+        return NestedCompleter.from_nested_dict({
+            "/model": model_targets,
+            "/runs": None,
+            "/rules": None,
+            "/help": None,
+            "/clear": None,
+            "exit": None,
+            "quit": None,
+        })
+
+    def _read_input(self) -> str:
+        """Renders a boxed input prompt with live command autocomplete instead of a bare
+        'loki > ' line. Falls back to a plain prompt for the rest of the session if the
+        terminal can't support prompt_toolkit's rendering (e.g. some non-native consoles,
+        piped/non-interactive input, or CI)."""
+        if self._use_boxed_prompt and not (sys.stdin.isatty() and sys.stdout.isatty()):
+            # No real interactive terminal (piped input, CI, some redirected subprocess
+            # setups) — skip straight to plain input. Attempting prompt_toolkit here risks
+            # it consuming/losing the first line of input before it fails.
+            self._use_boxed_prompt = False
+
+        if self._use_boxed_prompt:
+            if self._prompt_session is None:
+                try:
+                    self._prompt_session = PromptSession()
+                except Exception:
+                    self._use_boxed_prompt = False
+
+        if self._use_boxed_prompt and self._prompt_session is not None:
+            width = max(20, min(self.console.width, 100))
+            inner = width - 2
+            self.console.print(f"[dim red]╭{'─' * inner}╮[/dim red]")
+            try:
+                text = self._prompt_session.prompt(
+                    "│ ",
+                    completer=self._build_completer(),
+                    complete_while_typing=True,
+                )
+                self.console.print(f"[dim red]╰{'─' * inner}╯[/dim red]")
+                return text.strip().lstrip("﻿")
+            except (KeyboardInterrupt, EOFError):
+                self.console.print(f"[dim red]╰{'─' * inner}╯[/dim red]")
+                raise
+            except Exception:
+                # Terminal doesn't support prompt_toolkit's rendering — fall back below,
+                # for this and every later turn this session.
+                self.console.print(f"[dim red]╰{'─' * inner}╯[/dim red]")
+                self._use_boxed_prompt = False
+
+        return self.console.input("\n[bold red]❯[/bold red] ").strip().lstrip("﻿")
+
     def start(self):
         """Launches the interactive REPL chat session."""
         self.console.print(
@@ -278,8 +344,9 @@ Project & Testing Context:
         self.history.append({"role": "system", "content": system_instruction})
 
         while True:
+            self.console.print()
             try:
-                user_input = self.console.input("\n[bold red]loki > [/bold red]").strip()
+                user_input = self._read_input()
             except (KeyboardInterrupt, EOFError):
                 self.console.print("\n[dim]Session terminated. Goodbye![/dim]")
                 break
