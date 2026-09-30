@@ -25,8 +25,15 @@ from rich.table import Table
 from rich.markdown import Markdown
 from rich.status import Status
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import NestedCompleter
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import HSplit
+from prompt_toolkit.styles import Style
+from prompt_toolkit.widgets import Frame, TextArea
 
 
 class LokiChatSession:
@@ -38,7 +45,7 @@ class LokiChatSession:
         self.runs_dir = Path(runs_dir)
         self.console = Console()
         self.history: List[Dict[str, str]] = []
-        self._prompt_session: Optional[PromptSession] = None
+        self._input_history = InMemoryHistory()
         self._use_boxed_prompt = True
 
     def _load_project_context(self) -> str:
@@ -269,11 +276,49 @@ class LokiChatSession:
             "quit": None,
         })
 
+    _BOX_STYLE = Style.from_dict({"frame.border": "fg:#f85149"})
+
+    def _read_boxed_input(self) -> str:
+        """Renders a genuine bordered text box (all four sides, live, while typing) with
+        command autocomplete, using a real prompt_toolkit widget — not hand-drawn ASCII
+        lines printed before/after, which only ever show a floating top edge while typing."""
+
+        def accept(buff):
+            get_app().exit(result=buff.text)
+            return True
+
+        text_area = TextArea(
+            multiline=False,
+            wrap_lines=False,
+            completer=self._build_completer(),
+            complete_while_typing=True,
+            history=self._input_history,
+            accept_handler=accept,
+        )
+
+        kb = KeyBindings()
+
+        @kb.add("c-c")
+        def _(event):
+            raise KeyboardInterrupt()
+
+        @kb.add("c-d")
+        def _(event):
+            raise EOFError()
+
+        app = Application(
+            layout=Layout(HSplit([Frame(text_area)])),
+            key_bindings=kb,
+            style=self._BOX_STYLE,
+            full_screen=False,
+        )
+        return app.run() or ""
+
     def _read_input(self) -> str:
-        """Renders a boxed input prompt with live command autocomplete instead of a bare
-        'loki > ' line. Falls back to a plain prompt for the rest of the session if the
-        terminal can't support prompt_toolkit's rendering (e.g. some non-native consoles,
-        piped/non-interactive input, or CI)."""
+        """Reads one line of user input from a boxed prompt with live command autocomplete.
+        Falls back to a plain prompt for the rest of the session if the terminal can't
+        support prompt_toolkit's rendering (e.g. some non-native consoles, piped/
+        non-interactive input, or CI)."""
         if self._use_boxed_prompt and not (sys.stdin.isatty() and sys.stdout.isatty()):
             # No real interactive terminal (piped input, CI, some redirected subprocess
             # setups) — skip straight to plain input. Attempting prompt_toolkit here risks
@@ -281,31 +326,13 @@ class LokiChatSession:
             self._use_boxed_prompt = False
 
         if self._use_boxed_prompt:
-            if self._prompt_session is None:
-                try:
-                    self._prompt_session = PromptSession()
-                except Exception:
-                    self._use_boxed_prompt = False
-
-        if self._use_boxed_prompt and self._prompt_session is not None:
-            width = max(20, min(self.console.width, 100))
-            inner = width - 2
-            self.console.print(f"[dim red]╭{'─' * inner}╮[/dim red]")
             try:
-                text = self._prompt_session.prompt(
-                    "│ ",
-                    completer=self._build_completer(),
-                    complete_while_typing=True,
-                )
-                self.console.print(f"[dim red]╰{'─' * inner}╯[/dim red]")
-                return text.strip().lstrip("﻿")
+                return self._read_boxed_input().strip().lstrip("﻿")
             except (KeyboardInterrupt, EOFError):
-                self.console.print(f"[dim red]╰{'─' * inner}╯[/dim red]")
                 raise
             except Exception:
                 # Terminal doesn't support prompt_toolkit's rendering — fall back below,
                 # for this and every later turn this session.
-                self.console.print(f"[dim red]╰{'─' * inner}╯[/dim red]")
                 self._use_boxed_prompt = False
 
         return self.console.input("\n[bold red]❯[/bold red] ").strip().lstrip("﻿")
