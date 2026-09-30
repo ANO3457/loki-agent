@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 from typing import Dict, List, Any
-import yaml
 
 class ProjectScanner:
     """Scans the repository to identify technology stacks, endpoints, and setup LOKI."""
@@ -48,27 +47,40 @@ class ProjectScanner:
         (self.loki_dir / "runs").mkdir(parents=True, exist_ok=True)
         (self.loki_dir / "journeys").mkdir(parents=True, exist_ok=True)
         stack_info = self.detect_stack()
-        # 1. Create config.yaml
-        config_data = {
-            "version": "1.0",
-            "target": {
-                "default_url": default_target_url,
-                "timeout_seconds": 10,
-                "headless": True,
-            },
-            "chaos": {
-                "default_persona": "rage-clicker",
-                "click_burst_count": 5,
-            },
-            "ai": {
-                "provider": "gemini",
-                "model": "gemini-flash-latest",
-            },
-        }
+        # 1. Create config.yaml. Hand-written (not yaml.dump) so the `ai:` examples
+        # below survive as comments — yaml.dump would silently discard them.
+        config_content = f"""version: '1.0'
+target:
+  default_url: {default_target_url}
+  timeout_seconds: 10
+  headless: true
+chaos:
+  default_persona: rage-clicker
+  click_burst_count: 5
+
+# AI Brain: runs on LiteLLM, so ANY LiteLLM-compatible provider works here, not
+# just Gemini/OpenAI/Anthropic. Uncomment one block below (or write your own) —
+# see https://docs.litellm.ai/docs/providers for the full provider list.
+ai:
+  provider: gemini
+  model: gemini-flash-latest   # bundled default; needs GEMINI_API_KEY in your env
+
+  # --- Local model, e.g. Ollama (no API key needed) ---
+  # model: ollama/llama3
+
+  # --- Local model via an OpenAI-compatible server (Ollama, vLLM, LM Studio...) ---
+  # model: openai/llama3
+  # api_base: http://localhost:11434/v1
+
+  # --- Any other LiteLLM provider (Mistral, Groq, Cohere, Bedrock, Azure, ...) ---
+  # model: mistral/mistral-large-latest
+  # api_key_env: MISTRAL_API_KEY   # only needed if the env var name doesn't
+  #                                # match the provider's usual one
+"""
         config_path = self.loki_dir / "config.yaml"
         if not config_path.exists():
             with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+                f.write(config_content)
         # 2. Create rules.md for human-editable business rules
         rules_path = self.loki_dir / "rules.md"
         if not rules_path.exists():

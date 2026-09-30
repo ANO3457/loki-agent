@@ -132,6 +132,8 @@ ai:
 ```
 Once `ai:` (or `--model`) points anywhere other than the bundled Gemini default, LOKI tries exactly that connection — it never silently falls back to a different provider.
 
+`loki init` scaffolds `.loki/config.yaml` with these examples already written in as comments (including a local Ollama one-liner), so you never have to come back here to look up the syntax.
+
 ### 3. Initialize Workspace
 Analyze your target project and generate `.loki/` configuration:
 ```bash
