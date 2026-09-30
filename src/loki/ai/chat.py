@@ -28,6 +28,13 @@ from rich.status import Status
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import Completion, NestedCompleter
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit
+from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.styles import Style
+from prompt_toolkit.widgets import Frame, TextArea
 
 
 class _SlashNestedCompleter(NestedCompleter):
@@ -45,13 +52,6 @@ class _SlashNestedCompleter(NestedCompleter):
         for key in self.options:
             if key.lower().startswith(text.lower()):
                 yield Completion(key, start_position=-len(text))
-from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit
-from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.styles import Style
-from prompt_toolkit.widgets import Frame, TextArea
 
 
 class LokiChatSession:
@@ -216,12 +216,19 @@ class LokiChatSession:
             return
 
         sub = parts[0].lower()
+        reserved = {"add", "remove", "reset", "default"}
 
         if sub == "add":
             if len(parts) < 3:
                 self.console.print("[yellow]Usage: /model add <name> <model-id> [api_base=<url>] [api_key_env=<VAR>][/yellow]")
                 return
             name, model_id = parts[1], parts[2]
+            if name.lower() in reserved:
+                self.console.print(
+                    f"[yellow]'{name}' is a reserved /model command name (add/remove/reset/default) and can't be "
+                    f"used as a profile name — you'd never be able to switch back to it by name. Pick another.[/yellow]"
+                )
+                return
             api_base, api_key_env = None, None
             for token in parts[3:]:
                 if token.startswith("api_base="):
@@ -362,9 +369,12 @@ class LokiChatSession:
                 return self._read_boxed_input().strip().lstrip("﻿")
             except (KeyboardInterrupt, EOFError):
                 raise
-            except Exception:
+            except Exception as e:
                 # Terminal doesn't support prompt_toolkit's rendering — fall back below,
-                # for this and every later turn this session.
+                # for this and every later turn this session. Note it once rather than
+                # failing silently, so a genuine bug here doesn't just look like "the
+                # box feature quietly isn't available."
+                self.console.print(f"[dim yellow](boxed input unavailable: {e}; switching to plain prompt)[/dim yellow]")
                 self._use_boxed_prompt = False
 
         return self.console.input("\n[bold red]❯[/bold red] ").strip().lstrip("﻿")

@@ -55,8 +55,9 @@ def list_model_profiles() -> List[Dict[str, Any]]:
 
 
 def get_model_profile(name: str) -> Optional[Dict[str, Any]]:
+    name_lower = name.lower()
     for profile in list_model_profiles():
-        if profile.get("name") == name:
+        if str(profile.get("name", "")).lower() == name_lower:
             return profile
     return None
 
@@ -79,7 +80,10 @@ def add_model_profile(
         profile["api_base"] = api_base
     if api_key_env:
         profile["api_key_env"] = api_key_env
-    registry["profiles"] = [p for p in registry.get("profiles", []) if p.get("name") != name] + [profile]
+    name_lower = name.lower()
+    registry["profiles"] = [
+        p for p in registry.get("profiles", []) if str(p.get("name", "")).lower() != name_lower
+    ] + [profile]
     save_models_registry(registry)
     return profile
 
@@ -88,10 +92,11 @@ def remove_model_profile(name: str) -> bool:
     """Removes a profile by name. Clears `active` too if it pointed at it. Returns whether it existed."""
     registry = load_models_registry()
     profiles = registry.get("profiles", [])
-    remaining = [p for p in profiles if p.get("name") != name]
+    name_lower = name.lower()
+    remaining = [p for p in profiles if str(p.get("name", "")).lower() != name_lower]
     existed = len(remaining) != len(profiles)
     registry["profiles"] = remaining
-    if registry.get("active") == name:
+    if str(registry.get("active") or "").lower() == name_lower:
         registry["active"] = None
     if existed:
         save_models_registry(registry)
@@ -104,7 +109,7 @@ def activate_model_profile(name: str) -> Optional[Dict[str, Any]]:
     if not profile:
         return None
     registry = load_models_registry()
-    registry["active"] = name
+    registry["active"] = profile["name"]  # canonical stored casing, not whatever the caller typed
     save_models_registry(registry)
     return profile
 
@@ -178,20 +183,27 @@ def resolve_ai_connection(explicit_model: Optional[str] = None) -> Dict[str, Any
 
     Returns kwargs ready to splat into litellm.completion(**kwargs, messages=...).
     """
-    if not explicit_model:
-        active = get_active_model_profile()
-        if active:
-            kwargs: Dict[str, Any] = {"model": active["model"]}
-            if active.get("api_base"):
-                kwargs["api_base"] = active["api_base"]
-            if active.get("api_key_env"):
-                api_key = os.environ.get(active["api_key_env"])
-                if api_key:
-                    kwargs["api_key"] = api_key
-            return kwargs
+    if explicit_model:
+        # An explicit override (--model) gets a clean connection: just that model,
+        # nothing else. .loki/config.yaml's api_base/api_key_env belong to ITS OWN
+        # `model` entry — blindly inheriting them here would silently route an
+        # unrelated explicit model (and its provider's key) through whatever
+        # custom endpoint/key was configured for a different model entirely.
+        return {"model": explicit_model}
+
+    active = get_active_model_profile()
+    if active:
+        kwargs: Dict[str, Any] = {"model": active["model"]}
+        if active.get("api_base"):
+            kwargs["api_base"] = active["api_base"]
+        if active.get("api_key_env"):
+            api_key = os.environ.get(active["api_key_env"])
+            if api_key:
+                kwargs["api_key"] = api_key
+        return kwargs
 
     ai = load_loki_config().get("ai") or {}
-    kwargs = {"model": resolve_model(explicit_model)}
+    kwargs = {"model": resolve_model(None)}
 
     api_base = ai.get("api_base")
     if api_base:
