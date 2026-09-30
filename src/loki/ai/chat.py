@@ -27,11 +27,29 @@ from rich.status import Status
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
-from prompt_toolkit.completion import NestedCompleter
+from prompt_toolkit.completion import Completion, NestedCompleter
+
+
+class _SlashNestedCompleter(NestedCompleter):
+    """NestedCompleter's top-level fallback (no space typed yet) uses WordCompleter,
+    whose default word-boundary rules don't treat '/' as part of a word — so typing
+    '/mo' is matched as just 'mo', which never prefixes '/model'. This overrides only
+    that fallback with a plain, literal prefix match; nested dispatch (once there's a
+    space, e.g. '/model rem') is unaffected and still delegates to the normal logic."""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor.lstrip()
+        if " " in text:
+            yield from super().get_completions(document, complete_event)
+            return
+        for key in self.options:
+            if key.lower().startswith(text.lower()):
+                yield Completion(key, start_position=-len(text))
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import HSplit
+from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
 
@@ -266,7 +284,7 @@ class LokiChatSession:
             "reset": None,
             "default": None,
         })
-        return NestedCompleter.from_nested_dict({
+        return _SlashNestedCompleter.from_nested_dict({
             "/model": model_targets,
             "/runs": None,
             "/rules": None,
@@ -306,8 +324,22 @@ class LokiChatSession:
         def _(event):
             raise EOFError()
 
+        # FloatContainer + CompletionsMenu is what actually draws the suggestions
+        # dropdown near the cursor as you type; without it, completion still works
+        # internally (Tab/typing filters candidates) but nothing is ever shown.
+        root_container = FloatContainer(
+            content=HSplit([Frame(text_area)]),
+            floats=[
+                Float(
+                    xcursor=True,
+                    ycursor=True,
+                    content=CompletionsMenu(max_height=8, scroll_offset=1),
+                ),
+            ],
+        )
+
         app = Application(
-            layout=Layout(HSplit([Frame(text_area)])),
+            layout=Layout(root_container, focused_element=text_area),
             key_bindings=kb,
             style=self._BOX_STYLE,
             full_screen=False,
