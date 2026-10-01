@@ -120,6 +120,15 @@ $PYTHON = ".\.venv\Scripts\python.exe"
 # Inside chat: /run, /fix, /report call the same run()/fix()/report() functions
 # as the standalone CLI commands directly (see src/loki/ai/chat.py's
 # _run_cli_action) — no separate reimplementation to keep in sync.
+
+# 8. Infrastructure chaos — faults below the browser (src/loki/engine/infra_chaos.py)
+&$PYTHON -m src.loki.cli infra list                        # Find a --port/--pid to target
+&$PYTHON -m src.loki.cli infra kill --port 5432             # Crash whatever's listening there
+&$PYTHON -m src.loki.cli infra pause --port 5432 -d 10       # Hang it for 10s, then resume
+&$PYTHON -m src.loki.cli infra cpu-stress -d 5               # Saturate every core for 5s
+&$PYTHON -m src.loki.cli infra memory-stress -d 5 --mb 1024  # Hold 1GB resident for 5s
+# --container <name> on kill/pause targets a local Docker container instead of a process.
+# Scoped to the local machine only (no remote/SSH/cloud backend) — see safety note below.
 ```
 
 ---

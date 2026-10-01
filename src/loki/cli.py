@@ -38,6 +38,7 @@ from src.loki.engine.recorder import JourneyRecorder
 from src.loki.engine.replayer import IncidentReplayer
 from src.loki.engine.ci import CIGate
 from src.loki.engine.healer import CodeHealer
+from src.loki.engine import infra_chaos
 from src.loki.safety import (
     authorize_host,
     extract_host,
@@ -133,6 +134,113 @@ def auth_remove(host: str = typer.Argument(..., help="Hostname to revoke authori
         console.print(f"[green]✔ Revoked authorization for '{host}'.[/green]")
     else:
         console.print(f"[yellow]'{host}' wasn't authorized.[/yellow]")
+
+
+infra_app = typer.Typer(
+    help="Infrastructure-level chaos: kill/pause real local processes or Docker containers, "
+         "and CPU/memory stress — faults below the browser, not synthetic user behavior."
+)
+app.add_typer(infra_app, name="infra")
+
+
+def _print_infra_result(result: infra_chaos.InfraActionResult):
+    if result.success:
+        console.print(Panel(result.detail, title=f"[bold green]✔ {result.action}[/bold green]", border_style="green"))
+    else:
+        console.print(Panel(result.detail, title=f"[bold red]✘ {result.action} failed[/bold red]", border_style="red"))
+        raise typer.Exit(code=1)
+
+
+@infra_app.command("list")
+def infra_list():
+    """Lists local processes with open listening ports — a quick way to find a --port/--pid to target."""
+    import psutil
+    table = Table(title="🔌 Local Listening Processes", border_style="cyan")
+    table.add_column("Port", justify="right")
+    table.add_column("PID", justify="right")
+    table.add_column("Process")
+    seen = set()
+    rows = []
+    for conn in psutil.net_connections(kind="inet"):
+        if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.pid:
+            key = (conn.laddr.port, conn.pid)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                name = psutil.Process(conn.pid).name()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                name = "?"
+            rows.append((conn.laddr.port, conn.pid, name))
+    for port, pid, name in sorted(rows):
+        table.add_row(str(port), str(pid), name)
+    if not rows:
+        console.print("[dim]No listening processes found (or insufficient permissions to list them).[/dim]")
+        return
+    console.print(table)
+
+
+@infra_app.command("kill")
+def infra_kill(
+    pid: Optional[int] = typer.Option(None, "--pid", help="Target process by exact PID"),
+    port: Optional[int] = typer.Option(None, "--port", help="Target the process listening on this local port"),
+    name: Optional[str] = typer.Option(None, "--name", help="Target the first process whose name contains this substring"),
+    container: Optional[str] = typer.Option(None, "--container", help="Kill a local Docker container by name/ID instead of a process"),
+):
+    """Kills a local process or Docker container outright — simulates a crashed/OOM-killed dependency."""
+    if container:
+        _print_infra_result(infra_chaos.kill_container(container))
+        return
+    if not any([pid, port, name]):
+        console.print("[bold red]Error:[/bold red] Specify one of --pid, --port, --name, or --container.")
+        raise typer.Exit(code=1)
+    _print_infra_result(infra_chaos.kill_process(pid=pid, port=port, name=name))
+
+
+@infra_app.command("pause")
+def infra_pause(
+    pid: Optional[int] = typer.Option(None, "--pid", help="Target process by exact PID"),
+    port: Optional[int] = typer.Option(None, "--port", help="Target the process listening on this local port"),
+    name: Optional[str] = typer.Option(None, "--name", help="Target the first process whose name contains this substring"),
+    container: Optional[str] = typer.Option(None, "--container", help="Pause a local Docker container by name/ID instead of a process"),
+    duration: float = typer.Option(5.0, "--duration", "-d", help="Seconds to keep it suspended before resuming"),
+):
+    """Suspends a local process (or pauses a container) for --duration seconds then resumes it —
+    simulates a hung/unresponsive dependency instead of a hard crash. Blocks for the duration."""
+    if container:
+        _print_infra_result(infra_chaos.pause_container(container, duration=duration))
+        return
+    if not any([pid, port, name]):
+        console.print("[bold red]Error:[/bold red] Specify one of --pid, --port, --name, or --container.")
+        raise typer.Exit(code=1)
+    with Status(f"[bold yellow]Suspended — resuming in {duration}s...[/bold yellow]", console=console):
+        result = infra_chaos.pause_process(pid=pid, port=port, name=name, duration=duration)
+    _print_infra_result(result)
+
+
+@infra_app.command("cpu-stress")
+def infra_cpu_stress(
+    duration: float = typer.Option(5.0, "--duration", "-d", help="Seconds to hold the CPU saturated"),
+    workers: Optional[int] = typer.Option(None, "--workers", "-w", help="Busy-loop workers to spawn (default: one per CPU core)"),
+):
+    """Saturates every CPU core for --duration seconds — simulates a noisy-neighbor CPU spike
+    competing with the target for the machine's compute, without touching any specific process."""
+    with Status(f"[bold yellow]Saturating CPU for {duration}s...[/bold yellow]", console=console):
+        result = infra_chaos.cpu_stress(duration=duration, workers=workers)
+    _print_infra_result(result)
+
+
+@infra_app.command("memory-stress")
+def infra_memory_stress(
+    duration: float = typer.Option(5.0, "--duration", "-d", help="Seconds to hold the memory allocated"),
+    mb: int = typer.Option(512, "--mb", help="Megabytes to allocate and hold resident"),
+):
+    """Holds --mb megabytes resident for --duration seconds — simulates memory pressure from a
+    noisy neighbor or a leaking dependency, without touching any specific process."""
+    with Status(f"[bold yellow]Holding {mb}MB for {duration}s...[/bold yellow]", console=console):
+        result = infra_chaos.memory_stress(duration=duration, megabytes=mb)
+    _print_infra_result(result)
+
 
 class PersonaChoice(str, Enum):
     RAGE_CLICKER = "rage-clicker"

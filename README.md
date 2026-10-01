@@ -65,11 +65,16 @@ At the end of an assault session, LOKI's AI Brain (model set in `.loki/config.ya
 * `/model` lists, switches, and adds AI model profiles on the fly (e.g. `/model add local ollama/llama3`) — the choice applies immediately, in that same session, to *every* LOKI AI feature (chat, rules evaluation, `fix`, auto-heal), not just chat, since it's saved to `.loki/models.json` and read from there first.
 * `/run [url] [flags]`, `/fix [run_id] [--apply]`, and `/report [run_id]` drive the exact same code as their standalone CLI commands — launch an attack, diagnose or patch an incident, or open a report, all without leaving the chat.
 
-### 🛡️ 8. Strict CI/CD Quality Gate
+### 💣 8. Infrastructure Chaos (`loki infra`)
+* Goes past the browser to fault-inject the real local process (or Docker container) backing your app: `loki infra kill --port 5432` kills whatever's listening there outright (a crashed/OOM-killed dependency), `loki infra pause --port 5432 -d 10` hangs it for 10s then resumes it (an unresponsive dependency instead of a hard crash), `loki infra cpu-stress`/`memory-stress` saturate every core or hold megabytes resident to simulate a noisy neighbor.
+* Scoped to your own machine (or local Docker daemon) — same trust boundary as `localhost` for `loki run`: if you can already signal it without extra credentials, it's yours to break.
+* `kill`/`cpu-stress`/`memory-stress` are verified against real processes; `pause` uses the standard OS suspend/resume mechanism but couldn't be confirmed to actually halt execution in every environment — test it against your own target before relying on it.
+
+### 🛡️ 9. Strict CI/CD Quality Gate
 * Seamlessly integrates into GitHub Actions, GitLab CI, or pre-commit pipelines (`--ci`, `--strict`).
 * Automatically formats and publishes test summaries to `$GITHUB_STEP_SUMMARY` and enforces deterministic exit codes (`0` on pass, `1` on failure).
 
-### 🚑 9. Autonomous Code Self-Healing (`loki fix --apply` & `loki run --auto-heal`)
+### 🚑 10. Autonomous Code Self-Healing (`loki fix --apply` & `loki run --auto-heal`)
 * Synthesizes precise, minimal surgical code patches to permanently eliminate the root cause of crashes.
 * Safely creates automatic backups (`.loki.bak`), applies the patch to your source code, and runs a closed-loop reproduction verification test.
 * If the crash still reproduces, LOKI automatically restores your code safely from backup.
@@ -177,6 +182,10 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki` / `loki chat` | Launch conversational QA terminal assistant REPL (the default screen) |
 | `loki chat` then `/model` | List, switch, or add AI model profiles (any LiteLLM provider, incl. local Ollama) |
 | `loki auth list` / `add <host>` / `remove <host>` | Manage which non-localhost hosts LOKI is authorized to attack |
+| `loki infra list` | List local processes with open listening ports |
+| `loki infra kill --port <N>` / `--pid <N>` / `--name <s>` / `--container <name>` | Kill a local process or Docker container outright |
+| `loki infra pause --port <N> -d <seconds>` | Suspend a process/container, then resume it after the given duration |
+| `loki infra cpu-stress` / `memory-stress` | Saturate every CPU core, or hold megabytes resident, for a given duration |
 
 ---
 
