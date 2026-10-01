@@ -275,9 +275,48 @@ def main(ctx: typer.Context):
         chat(model=None)
 
 @app.command()
-def version():
+def version(
+    check: bool = typer.Option(False, "--check", "-c", help="Check if a newer version is available on GitHub"),
+):
     """Display the installed version of Loki."""
     console.print(f"[bold yellow]LOKI Agent[/bold yellow] version [bold green]{__version__}[/bold green]")
+    if check:
+        from src.loki.engine.updater import check_for_updates, print_update_banner
+        with Status("[bold yellow]Checking for updates on GitHub...[/bold yellow]", console=console):
+            update_info = check_for_updates(force=True)
+        if update_info and update_info.get("available"):
+            print_update_banner(console, update_info)
+        else:
+            console.print("[dim]You are running the latest version.[/dim]")
+
+@app.command()
+def update(
+    check_only: bool = typer.Option(False, "--check", "-c", help="Only check for updates without installing"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force reinstall even if already on latest version"),
+):
+    """Check for and install LOKI updates using uv."""
+    from src.loki.engine.updater import check_for_updates, print_update_banner, perform_update
+
+    with Status("[bold yellow]Checking for updates on GitHub...[/bold yellow]", console=console):
+        update_info = check_for_updates(force=True)
+
+    if not update_info:
+        console.print("[yellow]Could not reach GitHub. Check your internet connection.[/yellow]")
+        raise typer.Exit(code=1)
+
+    if not update_info.get("available") and not force:
+        console.print(f"[bold green]✔ You are already on the latest version of LOKI (v{update_info['current_version']}).[/bold green]")
+        return
+
+    print_update_banner(console, update_info)
+
+    if check_only:
+        return
+
+    if Confirm.ask("Do you want to run the update now?", default=True):
+        success = perform_update(console)
+        if not success:
+            raise typer.Exit(code=1)
 
 @app.command()
 def init(

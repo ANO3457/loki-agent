@@ -7,6 +7,7 @@ import typer
 import litellm
 litellm.suppress_debug_info = True
 
+from src.loki import __version__
 from src.loki.config import (
     activate_model_profile,
     add_model_profile,
@@ -19,6 +20,7 @@ from src.loki.config import (
     resolve_ai_connection,
     resolve_model,
 )
+from src.loki.engine.updater import check_for_updates, print_update_banner, perform_update
 
 from rich.console import Console
 from rich.panel import Panel
@@ -465,6 +467,29 @@ class LokiChatSession:
 
         self._run_cli_action("loki report", cli_report, run_id=run_id, open_browser=open_browser)
 
+    def _handle_update_command(self):
+        """Checks for updates and executes the self-update via uv if requested."""
+        with Status("[bold yellow]Checking for updates on GitHub...[/bold yellow]", console=self.console):
+            update_info = check_for_updates(force=True)
+
+        if not update_info:
+            self.console.print("[yellow]Could not reach GitHub. Check your internet connection.[/yellow]")
+            return
+
+        if not update_info.get("available"):
+            curr = update_info.get("current_version", __version__)
+            self.console.print(f"[bold green]✔ You are already on the latest version of LOKI (v{curr}).[/bold green]")
+            return
+
+        print_update_banner(self.console, update_info)
+
+        from rich.prompt import Confirm
+        try:
+            if Confirm.ask("Do you want to update LOKI now via uv?", default=True):
+                perform_update(self.console)
+        except (KeyboardInterrupt, EOFError):
+            self.console.print("\n[dim]Update cancelled.[/dim]")
+
     def _build_completer(self) -> NestedCompleter:
         """Builds a fresh Tab/as-you-type completer, including saved /model profile names."""
         profile_names = [p["name"] for p in list_model_profiles()]
@@ -485,6 +510,7 @@ class LokiChatSession:
             "/report": {"--no-open": None},
             "/runs": None,
             "/rules": None,
+            "/update": None,
             "/help": None,
             "/clear": None,
             "exit": None,
@@ -583,10 +609,18 @@ class LokiChatSession:
 [bold white]Interactive AI QA & Chaos Testing Assistant[/bold white]
 [dim]Powered by LiteLLM ({self.model})[/dim]
 
-[cyan]Commands:[/cyan] [bold]/help[/bold] (commands), [bold]/model[/bold] (switch AI model), [bold]/runs[/bold] (list runs), [bold]/rules[/bold] (view rules), [bold]/clear[/bold] (clear screen), [bold]exit[/bold] (quit)""",
+[cyan]Commands:[/cyan] [bold]/help[/bold] (commands), [bold]/model[/bold] (switch AI model), [bold]/runs[/bold] (list runs), [bold]/rules[/bold] (view rules), [bold]/update[/bold] (upgrade LOKI), [bold]/clear[/bold] (clear screen), [bold]exit[/bold] (quit)""",
                 border_style="red",
             )
         )
+
+        # Check for available updates on GitHub and notify user
+        try:
+            update_info = check_for_updates()
+            if update_info and update_info.get("available"):
+                print_update_banner(self.console, update_info)
+        except Exception:
+            pass
 
         project_context = self._load_project_context()
 
@@ -628,6 +662,7 @@ Project & Testing Context:
                         "• [bold cyan]/model[/bold cyan] — View, switch, or add AI models (e.g. /model add local ollama/llama3)\n"
                         "• [bold cyan]/runs[/bold cyan] — List recent test runs, crashes, and report files\n"
                         "• [bold cyan]/rules[/bold cyan] — Display active business rules from .loki/rules.md\n"
+                        "• [bold cyan]/update[/bold cyan] — Check for updates and upgrade LOKI via uv\n"
                         "• [bold cyan]/clear[/bold cyan] — Clear terminal screen\n"
                         "• [bold cyan]exit[/bold cyan] / [bold cyan]quit[/bold cyan] — Exit interactive chat session\n"
                         "• Ask any question about QA testing, code bugs, race conditions, or past runs!",
@@ -635,6 +670,10 @@ Project & Testing Context:
                         border_style="cyan",
                     )
                 )
+                continue
+
+            if cmd_lower in ["/update", "/upgrade"]:
+                self._handle_update_command()
                 continue
 
             if cmd_lower == "/model" or cmd_lower.startswith("/model "):

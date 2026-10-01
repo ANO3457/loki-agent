@@ -24,6 +24,7 @@ dist/
 .loki/models.json
 .loki/authorized_targets.json
 .loki/infra_stress_workers.json
+.loki/.update_cache.json
 *.loki.bak
 
 # Environment secrets and keys

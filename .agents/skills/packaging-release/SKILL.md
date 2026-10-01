@@ -42,3 +42,17 @@ uv tool install git+https://github.com/Elabsurdo984/loki-agent.git
 # Run directly via uvx (like npx)
 uvx --from git+https://github.com/Elabsurdo984/loki-agent.git loki run http://localhost:8000 --swarm
 ```
+
+## 4. Self-Update with `uv`
+
+```bash
+# Interactively from LOKI Chat
+/update
+
+# From terminal CLI
+loki update
+
+# Direct uv commands
+uv tool upgrade loki-chaos-agent
+uv tool install --force git+https://github.com/Elabsurdo984/loki-agent.git
+```

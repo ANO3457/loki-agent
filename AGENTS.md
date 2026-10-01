@@ -129,6 +129,11 @@ $PYTHON = ".\.venv\Scripts\python.exe"
 &$PYTHON -m src.loki.cli infra memory-stress -d 5 --mb 1024  # Hold 1GB resident for 5s
 # --container <name> on kill/pause targets a local Docker container instead of a process.
 # Scoped to the local machine only (no remote/SSH/cloud backend) — see safety note below.
+
+# 9. Self-update and version management (src/loki/engine/updater.py)
+&$PYTHON -m src.loki.cli version --check                   # Check if newer release exists on GitHub
+&$PYTHON -m src.loki.cli update                            # Check and upgrade via uv
+# Inside chat: /update checks GitHub releases and upgrades directly with user confirmation.
 ```
 
 ---

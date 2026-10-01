@@ -181,7 +181,8 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki replay` | Deterministically replay captured incident or open video (`--video`) |
 | `loki` / `loki chat` | Launch conversational QA terminal assistant REPL (the default screen) |
 | `loki chat` then `/model` | List, switch, or add AI model profiles (any LiteLLM provider, incl. local Ollama) |
-| `loki auth list` / `add <host>` / `remove <host>` | Manage which non-localhost hosts LOKI is authorized to attack |
+| `loki update` | Check for updates on GitHub and upgrade LOKI using `uv` |
+| `loki version` / `loki version --check` | Display installed version and check for newer releases |
 | `loki infra list` | List local processes with open listening ports |
 | `loki infra kill --port <N>` / `--pid <N>` / `--name <s>` / `--container <name>` | Kill a local process or Docker container outright |
 | `loki infra pause --port <N> -d <seconds>` | Suspend a process/container, then resume it after the given duration |
