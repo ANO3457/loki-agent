@@ -151,6 +151,44 @@ def perform_update(console: Console) -> bool:
         console.print(f"  [cyan]git pull ; pip install -e .[/cyan]")
         return False
 
+    # On Windows, running executables and directories containing them are locked by the OS.
+    # Trying to overwrite loki.exe or Scripts directory while LOKI is executing causes 'os error 5 / 32' (Access Denied).
+    if os.name == "nt":
+        console.print(
+            "\n[bold yellow]⚡ Windows Self-Update Notice:[/bold yellow]\n"
+            "On Windows, running executables (`loki.exe`) are locked by the operating system.\n"
+            "Launching external updater window and exiting LOKI to release file locks..."
+        )
+
+        # Invalidate cache
+        if CACHE_FILE.exists():
+            try:
+                CACHE_FILE.unlink()
+            except Exception:
+                pass
+
+        cmd_str = (
+            f'Write-Host "🔄 Updating LOKI via uv..." -ForegroundColor Cyan; '
+            f'Start-Sleep -Seconds 2; '
+            f'& "{uv_bin}" tool upgrade loki-chaos-agent; '
+            f'if ($LASTEXITCODE -ne 0) {{ & "{uv_bin}" tool install --force git+https://github.com/{GITHUB_REPO}.git }}; '
+            f'Write-Host "`n✔ LOKI updated successfully! Press any key to close..." -ForegroundColor Green; '
+            f'[Console]::ReadKey($true) | Out-Null'
+        )
+        try:
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-Command", cmd_str],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+            console.print("[bold green]✔ Updater window launched. Exiting LOKI...[/bold green]")
+            time.sleep(0.5)
+            sys.exit(0)
+        except Exception as e:
+            console.print(f"[bold red]Could not launch external updater:[/bold red] {e}")
+            console.print("Please exit LOKI and run in your terminal:")
+            console.print("  [bold cyan]uv tool upgrade loki-chaos-agent[/bold cyan]")
+            return False
+
     console.print("[bold cyan]🔄 Updating LOKI via uv...[/bold cyan]\n")
 
     # Try uv tool upgrade loki-chaos-agent first
