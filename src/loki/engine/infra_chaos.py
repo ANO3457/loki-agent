@@ -12,23 +12,76 @@ Reaching a *remote* host's infrastructure (SSH, a remote Docker context, a cloud
 API) is a different, far more sensitive capability and is explicitly out of
 scope here; see AGENTS.md before ever adding that.
 """
+import json
 import os
 import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import psutil
 
 # Process names that must never be targeted, even if a caller asks by name/port
 # collision — killing/pausing these would take down the operator's own machine or
-# this very tool, not the thing under test.
-_PROTECTED_NAME_FRAGMENTS = (
-    "system", "svchost", "wininit", "winlogon", "csrss", "smss", "lsass",
-    "explorer", "dwm", "systemd", "init", "launchd", "kernel_task",
-)
+# this very tool, not the thing under test. Matched as a WHOLE process name (minus
+# extension), never a bare substring: a naive "init" in name.lower() check also
+# protects legitimate targets like 'initdb.exe' (Postgres' own init process) or
+# any app with "init"/"systemd" somewhere in its name, which isn't the intent.
+_PROTECTED_NAMES = {
+    "system", "svchost.exe", "wininit.exe", "winlogon.exe", "csrss.exe", "smss.exe",
+    "lsass.exe", "explorer.exe", "dwm.exe", "systemd", "init", "launchd", "kernel_task",
+}
+
+# Tracks PIDs of cpu_stress/memory_stress workers while they're deliberately kept
+# alive, so a run that gets killed from the outside (crash, taskkill, a supervisor,
+# Task Manager "End task" — not just a clean Ctrl+C) can be reconciled afterward
+# with `loki infra cleanup` instead of leaving them silently burning CPU/memory.
+_STRESS_WORKERS_TRACKING_PATH = Path(".loki/infra_stress_workers.json")
+
+
+def _track_workers(pids: List[int]) -> None:
+    _STRESS_WORKERS_TRACKING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    existing = _read_tracked_workers()
+    _STRESS_WORKERS_TRACKING_PATH.write_text(json.dumps(sorted(set(existing) | set(pids))), encoding="utf-8")
+
+
+def _untrack_workers(pids: List[int]) -> None:
+    remaining = [p for p in _read_tracked_workers() if p not in set(pids)]
+    if remaining:
+        _STRESS_WORKERS_TRACKING_PATH.write_text(json.dumps(remaining), encoding="utf-8")
+    else:
+        _STRESS_WORKERS_TRACKING_PATH.unlink(missing_ok=True)
+
+
+def _read_tracked_workers() -> List[int]:
+    if not _STRESS_WORKERS_TRACKING_PATH.exists():
+        return []
+    try:
+        return json.loads(_STRESS_WORKERS_TRACKING_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def cleanup_stress_workers() -> "tuple[List[int], List[int]]":
+    """Kills any stress workers left tracked from a run that didn't exit cleanly
+    (the parent `loki infra cpu-stress`/`memory-stress` process got killed from
+    the outside before its own `finally` cleanup could run). Safe to call anytime
+    — PIDs that are already gone are just dropped from the tracking file."""
+    tracked = _read_tracked_workers()
+    killed, already_gone = [], []
+    for pid in tracked:
+        try:
+            psutil.Process(pid).kill()
+            killed.append(pid)
+        except psutil.NoSuchProcess:
+            already_gone.append(pid)
+        except psutil.AccessDenied:
+            pass
+    _STRESS_WORKERS_TRACKING_PATH.unlink(missing_ok=True)
+    return killed, already_gone
 
 
 @dataclass
@@ -53,7 +106,8 @@ def _is_protected(proc: psutil.Process) -> bool:
         name = (proc.name() or "").lower()
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return True
-    return any(fragment in name for fragment in _PROTECTED_NAME_FRAGMENTS)
+    stem = name[:-4] if name.endswith(".exe") else name
+    return name in _PROTECTED_NAMES or stem in _PROTECTED_NAMES
 
 
 def find_processes(pid: Optional[int] = None, port: Optional[int] = None, name: Optional[str] = None) -> List[psutil.Process]:
@@ -65,10 +119,18 @@ def find_processes(pid: Optional[int] = None, port: Optional[int] = None, name: 
             return []
 
     if port is not None:
+        # LISTEN only — "the service on this port" means something listening there,
+        # not any connection that merely happens to be using that number as its own
+        # local/ephemeral port (e.g. an outbound client connection), which is a
+        # different process entirely and not what "--port" is meant to target.
         matches: List[psutil.Process] = []
         seen_pids = set()
         for conn in psutil.net_connections(kind="inet"):
-            if conn.laddr and conn.laddr.port == port and conn.pid and conn.pid not in seen_pids:
+            if (
+                conn.status == psutil.CONN_LISTEN
+                and conn.laddr and conn.laddr.port == port
+                and conn.pid and conn.pid not in seen_pids
+            ):
                 try:
                     matches.append(psutil.Process(conn.pid))
                     seen_pids.add(conn.pid)
@@ -169,7 +231,12 @@ def cpu_stress(duration: float = 5.0, workers: Optional[int] = None) -> InfraAct
     """Spawns `workers` (default: one per CPU core) busy-looping subprocesses for
     `duration` seconds to saturate every core, then kills them — simulates a noisy
     neighbor or a dependency pegging the CPU, without touching any specific process."""
-    worker_count = workers or (os.cpu_count() or 2)
+    # `workers or default` would silently replace an explicit 0 with the default,
+    # since 0 is falsy — only fall back to the default when workers is None.
+    worker_count = workers if workers is not None else (os.cpu_count() or 2)
+    if worker_count <= 0:
+        return InfraActionResult("cpu_stress", f"{worker_count} worker(s)", success=True, detail="0 workers requested — nothing to do.")
+
     procs = []
     try:
         for _ in range(worker_count):
@@ -178,6 +245,11 @@ def cpu_stress(duration: float = 5.0, workers: Optional[int] = None) -> InfraAct
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             procs.append(p)
+        # Tracked *before* sleeping: if this process gets killed from the outside
+        # during the sleep, `loki infra cleanup` can still find and kill these.
+        _track_workers([p.pid for p in procs])
+
+        dead_on_arrival = [p.pid for p in procs if p.poll() is not None]
         time.sleep(max(0.0, duration))
     finally:
         for p in procs:
@@ -186,6 +258,15 @@ def cpu_stress(duration: float = 5.0, workers: Optional[int] = None) -> InfraAct
                 p.wait(timeout=3)
             except Exception:
                 pass
+        _untrack_workers([p.pid for p in procs])
+
+    if dead_on_arrival:
+        return InfraActionResult(
+            "cpu_stress", f"{worker_count} worker(s)", success=False,
+            detail=f"{len(dead_on_arrival)}/{worker_count} worker(s) exited immediately instead of running — "
+                   f"stress was not fully applied.",
+            extra={"workers": worker_count, "dead_on_arrival": dead_on_arrival},
+        )
 
     return InfraActionResult(
         "cpu_stress", f"{worker_count} worker(s)", success=True,
@@ -205,18 +286,28 @@ def memory_stress(duration: float = 5.0, megabytes: int = 512) -> InfraActionRes
         "    buf[i] = 1\n"  # touch every page so the OS actually commits it, not just reserves it
         f"time.sleep({max(0.0, duration)})\n"
     )
+    p = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    _track_workers([p.pid])
     try:
-        p = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        p.wait(timeout=duration + 10)
-        success = True
-        detail = f"Held {megabytes}MB resident for {duration}s."
+        _, stderr = p.communicate(timeout=duration + 10)
+        if p.returncode == 0:
+            success = True
+            detail = f"Held {megabytes}MB resident for {duration}s."
+        else:
+            # The worker crashed (e.g. a negative/absurdly large --mb raising
+            # ValueError/MemoryError) — this must NOT be reported as success.
+            success = False
+            detail = f"Worker exited with code {p.returncode} instead of holding the memory: {(stderr or '').strip()[-300:]}"
     except subprocess.TimeoutExpired:
         p.kill()
+        p.wait(timeout=5)
         success = False
         detail = "Memory stress worker didn't exit cleanly within the expected window; killed it."
     except Exception as e:
         success = False
         detail = str(e)
+    finally:
+        _untrack_workers([p.pid])
 
     return InfraActionResult("memory_stress", f"{megabytes}MB", success=success, detail=detail, extra={"megabytes": megabytes})
 

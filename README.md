@@ -186,6 +186,7 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki infra kill --port <N>` / `--pid <N>` / `--name <s>` / `--container <name>` | Kill a local process or Docker container outright |
 | `loki infra pause --port <N> -d <seconds>` | Suspend a process/container, then resume it after the given duration |
 | `loki infra cpu-stress` / `memory-stress` | Saturate every CPU core, or hold megabytes resident, for a given duration |
+| `loki infra cleanup` | Kill any cpu-stress/memory-stress workers orphaned by a `loki infra` run that was killed from the outside |
 
 ---
 

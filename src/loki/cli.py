@@ -242,6 +242,23 @@ def infra_memory_stress(
     _print_infra_result(result)
 
 
+@infra_app.command("cleanup")
+def infra_cleanup():
+    """Kills any cpu-stress/memory-stress workers left behind by a run that was
+    killed from the outside before it could clean up after itself (a crash,
+    `taskkill`, a supervisor, Task Manager "End task" — not a clean Ctrl+C)."""
+    killed, already_gone = infra_chaos.cleanup_stress_workers()
+    if not killed and not already_gone:
+        console.print("[dim]Nothing to clean up — no stress workers were tracked.[/dim]")
+        return
+    lines = []
+    if killed:
+        lines.append(f"Killed {len(killed)} leftover worker(s): {', '.join(map(str, killed))}")
+    if already_gone:
+        lines.append(f"{len(already_gone)} tracked worker(s) were already gone: {', '.join(map(str, already_gone))}")
+    console.print(Panel("\n".join(lines), title="[bold green]✔ cleanup[/bold green]", border_style="green"))
+
+
 class PersonaChoice(str, Enum):
     RAGE_CLICKER = "rage-clicker"
     NOVICE_CHAOTIC = "novice-chaotic"
