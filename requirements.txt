@@ -8,3 +8,4 @@ pillow>=10.0.0
 prompt_toolkit>=3.0.36
 pyinstaller>=6.0.0
 tenacity>=8.2.0
+pytest>=8.0.0

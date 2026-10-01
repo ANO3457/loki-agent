@@ -44,8 +44,21 @@ dependencies = [
     "prompt_toolkit>=3.0.36",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+]
+
 [project.scripts]
 loki = "src.loki.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 
 [tool.setuptools.dynamic]
 version = { attr = "src.loki.__version__" }
