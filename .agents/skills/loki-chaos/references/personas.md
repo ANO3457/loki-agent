@@ -39,6 +39,7 @@ This reference details the attack vectors, behavioral mechanics, and mutation st
   - Removes `disabled` and `readonly` attributes from DOM elements via JavaScript evaluation.
   - Forces hidden input fields or obscured buttons to become visible (`display: block !important`).
   - Alters values of disabled submit buttons or hidden checkout totals and triggers form submissions.
+  - **Login targeting**: detects fields that look like a login's email/username (`type="email"`, or id/name/autocomplete/placeholder containing `email`/`user`/`login`/`signin`) and fires the `AUTH_BYPASS_PAYLOADS` list (classic SQL-injection auth bypasses, e.g. `' OR 1=1--`) at them specifically, immediately followed by a click on the likely submit button — instead of competing on equal footing with every other input for a random pick. Watches the very next response for a `< 400` status carrying a `token`/`authentication` field and logs a `🚨 POSSIBLE AUTHENTICATION BYPASS` line when it sees one. Confirmed against OWASP Juice Shop's intentionally vulnerable login.
 
 ---
 
