@@ -309,7 +309,7 @@ class LokiChatSession:
             duration=None, headed=False, swarm=False, journey=None,
             rules=True, report_html=True, open_report=False, ci=False,
             strict=False, auto_heal=False, device=None, orientation="portrait",
-            concurrency=1, target_selector=None,
+            concurrency=1, target_selector=None, authorized=False,
         )
 
         i = 0
@@ -388,6 +388,8 @@ class LokiChatSession:
                 kwargs["strict"] = True
             elif low in ("-H", "--auto-heal"):
                 kwargs["auto_heal"] = True
+            elif low == "--authorized":
+                kwargs["authorized"] = True
             elif not t.startswith("-") and url is None:
                 url = t
             else:

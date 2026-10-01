@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
 from rich.table import Table
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from src.loki.engine.sandbox import ChaosSandbox
 from src.loki.engine.reporter import IncidentReporter
@@ -38,6 +38,14 @@ from src.loki.engine.recorder import JourneyRecorder
 from src.loki.engine.replayer import IncidentReplayer
 from src.loki.engine.ci import CIGate
 from src.loki.engine.healer import CodeHealer
+from src.loki.safety import (
+    authorize_host,
+    extract_host,
+    is_host_authorized,
+    is_local_host,
+    list_authorized_hosts,
+    revoke_host,
+)
 
 console = Console()
 app = typer.Typer(
@@ -45,6 +53,86 @@ app = typer.Typer(
     help="⚡ LOKI: Synthetic Chaos & Exploratory AI Testing Agent",
     add_completion=False,
 )
+auth_app = typer.Typer(help="Manage which non-local hosts LOKI is authorized to attack.")
+app.add_typer(auth_app, name="auth")
+
+
+def ensure_target_authorized(url: str, authorized_flag: bool = False) -> None:
+    """Refuses to proceed against a non-local target unless the user has already
+    confirmed authorization for that host (remembered from a previous run), passes
+    --authorized this run, or confirms interactively right now. Never silently
+    proceeds and never silently blocks without saying why."""
+    if is_local_host(url) or is_host_authorized(url):
+        return
+
+    host = extract_host(url)
+
+    if authorized_flag:
+        authorize_host(url, note="--authorized flag")
+        console.print(f"[yellow]⚠ Proceeding against non-local target '{host}' (--authorized).[/yellow]")
+        return
+
+    warning = (
+        f"[bold red]⚠ AUTHORIZATION REQUIRED[/bold red]\n\n"
+        f"Target host: [bold]{host}[/bold] (not localhost)\n\n"
+        f"LOKI is about to run a real attack against this host: input fuzzing, security\n"
+        f"payloads, forced clicks, and/or concurrent requests. Only proceed if:\n\n"
+        f"  • You own this host, or have explicit written authorization to test it\n"
+        f"  • It's within a bug bounty program's documented scope\n"
+        f"  • It's a dedicated practice target (OWASP Juice Shop, a CTF box, ...)\n\n"
+        f"[dim]Confirmed once, this is remembered for '{host}' — run `loki auth remove {host}` to revoke it.[/dim]"
+    )
+
+    if not sys.stdin.isatty():
+        console.print(Panel(warning, border_style="red"))
+        console.print(
+            "[bold red]Refusing to run non-interactively against an unauthorized target.[/bold red] "
+            "Pass --authorized if you have the right to test this host."
+        )
+        raise typer.Exit(code=1)
+
+    console.print(Panel(warning, border_style="red"))
+    typed = Prompt.ask(f"Type the host name ([bold]{host}[/bold]) to confirm, or anything else to cancel")
+    if typed.strip().lower() != host:
+        console.print("[yellow]Cancelled. Nothing was run.[/yellow]")
+        raise typer.Exit(code=1)
+
+    authorize_host(url, note="confirmed interactively")
+    console.print(f"[green]✔ Authorization recorded for '{host}'.[/green]")
+
+
+@auth_app.command("list")
+def auth_list():
+    """Lists non-local hosts you've confirmed authorization for."""
+    hosts = list_authorized_hosts()
+    if not hosts:
+        console.print("[dim]No non-local hosts authorized yet. localhost is always allowed.[/dim]")
+        return
+    table = Table(title="🔑 Authorized Targets", border_style="cyan")
+    table.add_column("Host", style="bold")
+    table.add_column("Authorized At", style="dim")
+    table.add_column("Note", style="dim")
+    for host, info in hosts.items():
+        table.add_row(host, info.get("authorized_at", ""), info.get("note", ""))
+    console.print(table)
+
+
+@auth_app.command("add")
+def auth_add(
+    host: str = typer.Argument(..., help="Hostname to pre-authorize (e.g. staging.example.com), not a full URL"),
+):
+    """Pre-authorizes a host so `loki run`/`loki record` against it won't prompt."""
+    resolved = authorize_host(host, note="loki auth add")
+    console.print(f"[green]✔ Authorized '{resolved}'.[/green] `loki run`/`loki record` against it won't prompt anymore.")
+
+
+@auth_app.command("remove")
+def auth_remove(host: str = typer.Argument(..., help="Hostname to revoke authorization for")):
+    """Revokes a previously confirmed host — future runs against it will prompt again."""
+    if revoke_host(host):
+        console.print(f"[green]✔ Revoked authorization for '{host}'.[/green]")
+    else:
+        console.print(f"[yellow]'{host}' wasn't authorized.[/yellow]")
 
 class PersonaChoice(str, Enum):
     RAGE_CLICKER = "rage-clicker"
@@ -180,6 +268,12 @@ def run(
         help="CSS selector for the --concurrency probe's synchronized click (defaults to the journey's "
              "first click step, or the first visible button on the page)",
     ),
+    authorized: bool = typer.Option(
+        False,
+        "--authorized",
+        help="Confirms you own this target or have explicit permission to test it. Required (or an "
+             "interactive confirmation) for any non-localhost URL; skips that prompt for scripted/CI use.",
+    ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
     is_ci_mode = ci or strict or CIGate.is_ci_environment()
@@ -210,6 +304,8 @@ def run(
         console.print("[bold red]Error:[/bold red] No target URL provided and no default found in .loki/config.yaml.")
         console.print("Run [bold cyan]python -m src.loki.cli init[/bold cyan] first, or pass a URL: [bold green]loki run <url>[/bold green]")
         raise typer.Exit(code=1)
+
+    ensure_target_authorized(resolved_url, authorized_flag=authorized)
 
     resolved_duration = duration if duration is not None else target_config.get("timeout_seconds", 5)
     chaos_config = config.get("chaos", {})
@@ -540,6 +636,8 @@ def record(
     if not resolved_url:
         console.print("[bold red]Error:[/bold red] No target URL found in .loki/config.yaml or provided as option.")
         raise typer.Exit(code=1)
+
+    ensure_target_authorized(resolved_url)
 
     console.print(
         Panel(

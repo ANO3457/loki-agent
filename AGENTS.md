@@ -68,6 +68,8 @@ On-demand procedures and runbooks are organized under `.agents/skills/` with pro
 
 ## 6. Core CLI Runbook
 
+**Authorization guardrail**: `run`/`record` against `localhost` is unrestricted; against any other host, `src/loki/cli.py`'s `ensure_target_authorized()` (backed by `src/loki/safety.py`) blocks until the user confirms ownership/permission — interactively (type the hostname back) or via `--authorized` for CI. Confirmed hosts are remembered in `.loki/authorized_targets.json` (gitignored, per-machine), managed with `loki auth list/add/remove`. Never bypass or weaken this check to "make a request work" — if a target won't authorize, that's the end of it, not a prompt to find a workaround.
+
 **AI provider**: LOKI's AI Brain runs on LiteLLM, so it works with any LiteLLM-compatible provider — Gemini (bundled default), OpenAI, Anthropic, Mistral, Groq, Bedrock, a local Ollama/vLLM server, or any other OpenAI-compatible endpoint. Resolution order (see `src/loki/config.py`'s `resolve_ai_connection()`): an explicit `--model` flag > the active profile in `.loki/models.json` (managed from `loki chat`'s `/model` command) > `ai:` in `.loki/config.yaml` (`model`, optional `api_base`, optional `api_key_env`) > the bundled default. Once anything is customized past the default, LOKI tries exactly that connection and never silently falls back to a different provider.
 
 All commands are executed via Python module syntax using the project virtual environment:

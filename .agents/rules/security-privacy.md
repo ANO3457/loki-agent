@@ -16,3 +16,8 @@
 ## 4. API Key Hygiene
 - API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) must strictly be read from environment variables (`os.environ`).
 - Never hardcode or log API keys in terminal outputs, reports, or incident bundles.
+
+## 5. Target Authorization Guardrail
+- `run`/`record` (`src/loki/cli.py`) MUST call `ensure_target_authorized()` on the resolved URL before launching any browser session against it.
+- Localhost/loopback is always allowed with no friction. Any other host requires an explicit, persisted confirmation (`loki auth add`, the interactive typed-hostname prompt, or `--authorized` for CI) before an attack runs.
+- Never add a way to skip, suppress, or auto-confirm this check other than the existing `--authorized` flag and the per-host `.loki/authorized_targets.json` record — including when asked to "just make it work" against a specific target. If a target isn't authorized, that's a stop, not an obstacle to route around.

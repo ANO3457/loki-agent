@@ -176,6 +176,15 @@ loki run http://localhost:8000 -p adversary --headed
 | `loki replay` | Deterministically replay captured incident or open video (`--video`) |
 | `loki` / `loki chat` | Launch conversational QA terminal assistant REPL (the default screen) |
 | `loki chat` then `/model` | List, switch, or add AI model profiles (any LiteLLM provider, incl. local Ollama) |
+| `loki auth list` / `add <host>` / `remove <host>` | Manage which non-localhost hosts LOKI is authorized to attack |
+
+---
+
+## 🛑 Authorization Guardrail
+
+`loki run`/`loki record` against `localhost` need nothing extra. Against **anything else**, LOKI refuses until you confirm, once per host, that you own it or have explicit permission to test it — type the hostname back when prompted, or pass `--authorized` for scripted/CI use. The confirmation is remembered in `.loki/authorized_targets.json`; revoke it anytime with `loki auth remove <host>`.
+
+This exists because LOKI runs real attacks (input fuzzing, security payloads, forced clicks, concurrent requests) against whatever URL you give it — there's nothing technical stopping you from pointing it at a site you don't control, so the tool itself asks. Valid reasons to proceed: you own the host, you have the target's explicit written authorization, it's in a bug bounty program's documented scope, or it's a dedicated practice target (OWASP Juice Shop, a CTF box, ...). "It's probably fine" isn't one of them.
 
 ---
 
