@@ -287,6 +287,14 @@ class ChaosSandbox:
                             for issue in self._sniff_mobile_layout(page):
                                 if issue not in report.layout_issues:
                                     report.layout_issues.append(issue)
+
+                        # Sniff for UI freeze or blank screen after session disruptions
+                        if persona and hasattr(persona, "api_chaos"):
+                            freeze = persona.api_chaos.sniff_white_screen_or_freeze(page)
+                            if freeze:
+                                freeze_issue = f"[UI Freeze / Blank Screen] {freeze.get('reason', 'Application collapsed or became non-responsive')}"
+                                if freeze_issue not in report.layout_issues:
+                                    report.layout_issues.append(freeze_issue)
                         dom_info = page.evaluate("""() => {
                             const elements = [];
                             document.querySelectorAll('button, input, select, a, .status, .alert, .badge, [role="alert"]').forEach(el => {

@@ -328,3 +328,134 @@ class TestReporterReproIntegration:
         assert len(metadata["api_faults"]) == 1
         assert metadata["api_faults"][0]["status"] == 503
 
+
+class TestAuthChaos:
+    def test_has_auth_credentials(self):
+        engine = ApiChaosEngine()
+
+        req_auth = MagicMock()
+        req_auth.headers = {"Authorization": "Bearer abc123xyz"}
+        assert engine.has_auth_credentials(req_auth) is True
+
+        req_api_key = MagicMock()
+        req_api_key.headers = {"X-API-KEY": "secret_key_123"}
+        assert engine.has_auth_credentials(req_api_key) is True
+
+        req_clean = MagicMock()
+        req_clean.headers = {"Content-Type": "application/json", "Accept": "*/*"}
+        assert engine.has_auth_credentials(req_clean) is False
+
+    def test_inject_token_invalidation(self):
+        config = ApiChaosConfig(auth_chaos_enabled=True, auth_fault_rate=1.0, auth_fault_types=["token_invalidation"])
+        engine = ApiChaosEngine(config)
+
+        route = MagicMock()
+        request = MagicMock()
+        request.url = "https://example.com/api/profile"
+        request.method = "GET"
+        request.headers = {
+            "authorization": "Bearer token123",
+            "x-api-key": "secret456",
+            "content-type": "application/json",
+        }
+
+        engine._inject_token_invalidation(route, request)
+
+        assert len(engine.injected_faults) == 1
+        assert engine.injected_faults[0].fault_type == "token_invalidation"
+        route.continue_.assert_called_once()
+        mutated_headers = route.continue_.call_args.kwargs["headers"]
+        assert "authorization" not in mutated_headers
+        assert "x-api-key" not in mutated_headers
+        assert mutated_headers["content-type"] == "application/json"
+        assert mutated_headers["x-loki-auth-chaos"] == "token_stripped"
+
+    def test_inject_token_corruption(self):
+        config = ApiChaosConfig(auth_chaos_enabled=True, auth_fault_rate=1.0, auth_fault_types=["token_corruption"])
+        engine = ApiChaosEngine(config)
+
+        route = MagicMock()
+        request = MagicMock()
+        request.url = "https://example.com/api/profile"
+        request.method = "GET"
+        request.headers = {"authorization": "Bearer valid_jwt_token"}
+
+        engine._inject_token_corruption(route, request)
+
+        assert len(engine.injected_faults) == 1
+        assert engine.injected_faults[0].fault_type == "token_corruption"
+        route.continue_.assert_called_once()
+        mutated_headers = route.continue_.call_args.kwargs["headers"]
+        assert "loki_corrupted_expired_token" in mutated_headers["authorization"]
+
+    def test_inject_unauthorized(self):
+        engine = ApiChaosEngine()
+
+        route = MagicMock()
+        request = MagicMock()
+        request.url = "https://example.com/api/settings"
+        request.method = "POST"
+
+        engine._inject_unauthorized(route, request, status=401)
+
+        assert len(engine.injected_faults) == 1
+        assert engine.injected_faults[0].fault_type == "401_unauthorized"
+        assert engine.injected_faults[0].injected_status == 401
+        route.fulfill.assert_called_once()
+        call_kwargs = route.fulfill.call_args.kwargs
+        assert call_kwargs["status"] == 401
+        body_data = json.loads(call_kwargs["body"].decode("utf-8"))
+        assert body_data["error"] == "Unauthorized"
+        assert body_data["code"] == "AUTH_TOKEN_EXPIRED"
+
+    def test_evict_session_cookies(self):
+        engine = ApiChaosEngine()
+        context = MagicMock()
+        context.cookies.return_value = [{"name": "session_id", "value": "1234"}]
+
+        page = MagicMock()
+        page.context = context
+
+        cleared = engine.evict_session_cookies(page)
+        assert cleared == 1
+        context.clear_cookies.assert_called_once()
+        assert len(engine.injected_faults) == 1
+        assert engine.injected_faults[0].fault_type == "cookie_eviction"
+
+    def test_sniff_white_screen_or_freeze(self):
+        engine = ApiChaosEngine()
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "type": "white_screen",
+            "reason": "Page body is completely blank (0 visible elements and empty text).",
+        }
+
+        result = engine.sniff_white_screen_or_freeze(page)
+        assert result is not None
+        assert result["type"] == "white_screen"
+
+    def test_auth_repro_routes(self):
+        engine = ApiChaosEngine()
+        engine.injected_faults.append(
+            ApiFaultEvent(
+                url="https://example.com/api/secret",
+                method="GET",
+                fault_type="401_unauthorized",
+                injected_status=401,
+                details={"error_payload": {"error": "Unauthorized"}},
+            )
+        )
+        engine.injected_faults.append(
+            ApiFaultEvent(
+                url="https://example.com/api/token",
+                method="POST",
+                fault_type="token_invalidation",
+            )
+        )
+
+        routes = engine.generate_repro_routes()
+        assert len(routes) == 2
+        assert routes[0]["status"] == 401
+        assert routes[1]["status"] == 401
+
+

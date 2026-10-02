@@ -89,7 +89,7 @@ class NetworkTormentorPersona(BasePersona):
                         target_btn = random.choice(valid_buttons)
                         btn_text = (target_btn.text_content() or "Action Button").strip()[:30]
                         selector = self.resilient_selector(target_btn)
-                        mode = step % 3
+                        mode = step % 4
 
                         # Variant A: Trigger click then immediately cut the connection (offline drop mid-flight)
                         if mode == 0:
@@ -123,7 +123,7 @@ class NetworkTormentorPersona(BasePersona):
                                 page.wait_for_timeout(150)
 
                         # Variant C: Semantic API fault injection burst
-                        else:
+                        elif mode == 2:
                             faults_before = len(self.api_chaos.injected_faults)
                             self.log_action(f"⚡ Testing '{btn_text}' under semantic API fault fuzzing")
                             target_btn.click(timeout=1000, no_wait_after=True, force=True)
@@ -134,6 +134,22 @@ class NetworkTormentorPersona(BasePersona):
                             for f in new_faults:
                                 self.log_action(f"⚡ Injected {f.fault_type} into {f.url}")
                                 self.record_step("api_fault", fault_type=f.fault_type, url=f.url, status=f.injected_status)
+
+                        # Variant D: Auth & Session Chaos assault (cookie drop / token disruption)
+                        else:
+                            cleared = self.api_chaos.evict_session_cookies(page)
+                            self.log_action(f"🔐 Session Chaos: Evicted {cleared} session cookies mid-flight on '{btn_text}'")
+                            self.record_step("cookie_eviction", cleared_count=cleared)
+                            target_btn.click(timeout=1000, no_wait_after=True, force=True)
+                            if selector:
+                                self.record_step("click", selector=selector, force=True)
+                            page.wait_for_timeout(600)
+
+                        # Sniff for UI freeze or white screen following the chaos event
+                        freeze_detected = self.api_chaos.sniff_white_screen_or_freeze(page)
+                        if freeze_detected:
+                            self.log_action(f"🚨 [UI FREEZE DETECTED] {freeze_detected['reason']}")
+                            self.record_step("ui_freeze", details=freeze_detected)
 
                     else:
                         # If no buttons, simulate offline toggle on page

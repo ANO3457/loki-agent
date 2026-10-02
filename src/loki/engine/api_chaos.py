@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
 from playwright.sync_api import BrowserContext, Page, Request, Route
+from src.loki.engine.scrubber import NetworkScrubber
 
 
 @dataclass
@@ -49,6 +50,16 @@ class ApiChaosConfig:
         ".woff", ".woff2", ".ttf", ".eot", ".ico", ".map", ".html"
     ])
     monster_string_len: int = 5000
+
+    # Auth & Session Chaos Settings
+    auth_chaos_enabled: bool = True
+    auth_fault_rate: float = 0.4  # Probability of attacking authenticated requests
+    auth_fault_types: List[str] = field(default_factory=lambda: [
+        "token_invalidation",
+        "401_unauthorized",
+        "403_forbidden",
+        "token_corruption",
+    ])
 
 
 @dataclass
@@ -219,6 +230,17 @@ class ApiChaosEngine:
         """Clears all recorded fault events."""
         self.injected_faults.clear()
 
+    def has_auth_credentials(self, request: Request) -> bool:
+        """Checks if the request carries authorization headers or session tokens."""
+        try:
+            headers = request.headers
+            for k in headers:
+                if k.lower() in NetworkScrubber.SENSITIVE_HEADERS:
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _handle_route(self, route: Route, request: Request) -> None:
         """Intercepts an individual route and decides whether and how to inject chaos."""
         try:
@@ -226,12 +248,33 @@ class ApiChaosEngine:
                 route.continue_()
                 return
 
-            # Random roll against fault_rate
+            # Auth & Session Chaos interception:
+            if self.config.auth_chaos_enabled and self.has_auth_credentials(request):
+                if random.random() < self.config.auth_fault_rate:
+                    auth_fault = (
+                        random.choice(self.config.auth_fault_types)
+                        if self.config.auth_fault_types
+                        else "token_invalidation"
+                    )
+                    if auth_fault == "token_invalidation":
+                        self._inject_token_invalidation(route, request)
+                        return
+                    elif auth_fault == "token_corruption":
+                        self._inject_token_corruption(route, request)
+                        return
+                    elif auth_fault == "401_unauthorized":
+                        self._inject_unauthorized(route, request, status=401)
+                        return
+                    elif auth_fault == "403_forbidden":
+                        self._inject_unauthorized(route, request, status=403)
+                        return
+
+            # Random roll against general fault_rate
             if random.random() > self.config.fault_rate:
                 route.continue_()
                 return
 
-            # Choose fault type
+            # Choose general fault type
             fault_type = random.choice(self.config.fault_types) if self.config.fault_types else "status_code"
 
             if fault_type == "status_code":
@@ -403,6 +446,136 @@ class ApiChaosEngine:
         except Exception:
             route.continue_()
 
+    def _inject_token_invalidation(self, route: Route, request: Request) -> None:
+        """Strips authentication headers from the outgoing request in-flight."""
+        mutated_headers = {
+            k: v for k, v in request.headers.items()
+            if k.lower() not in NetworkScrubber.SENSITIVE_HEADERS
+        }
+        mutated_headers["x-loki-auth-chaos"] = "token_stripped"
+
+        event = ApiFaultEvent(
+            url=request.url,
+            method=request.method,
+            fault_type="token_invalidation",
+            details={"action": "Stripped Authorization/API-Key headers in-flight"},
+        )
+        self.injected_faults.append(event)
+        route.continue_(headers=mutated_headers)
+
+    def _inject_token_corruption(self, route: Route, request: Request) -> None:
+        """Corrupts authentication header values with invalid signatures in-flight."""
+        mutated_headers = dict(request.headers)
+        for k in list(mutated_headers.keys()):
+            if k.lower() in NetworkScrubber.SENSITIVE_HEADERS:
+                mutated_headers[k] = "Bearer loki_corrupted_expired_token_signature_invalid"
+        mutated_headers["x-loki-auth-chaos"] = "token_corrupted"
+
+        event = ApiFaultEvent(
+            url=request.url,
+            method=request.method,
+            fault_type="token_corruption",
+            details={"action": "Replaced credentials with invalid signature in-flight"},
+        )
+        self.injected_faults.append(event)
+        route.continue_(headers=mutated_headers)
+
+    def _inject_unauthorized(self, route: Route, request: Request, status: int = 401) -> None:
+        """Fulfills the request with a synthetic 401 Unauthorized or 403 Forbidden payload."""
+        msg = (
+            "Authentication credentials invalid or expired"
+            if status == 401
+            else "Access denied for this resource"
+        )
+        error_payload = {
+            "error": "Unauthorized" if status == 401 else "Forbidden",
+            "message": f"{msg} (Simulated by LOKI Ghost in the Wire)",
+            "statusCode": status,
+            "code": "AUTH_TOKEN_EXPIRED",
+            "timestamp": time.time(),
+        }
+        body_bytes = json.dumps(error_payload).encode("utf-8")
+
+        event = ApiFaultEvent(
+            url=request.url,
+            method=request.method,
+            fault_type="401_unauthorized" if status == 401 else "403_forbidden",
+            injected_status=status,
+            details={"error_payload": error_payload},
+        )
+        self.injected_faults.append(event)
+
+        route.fulfill(
+            status=status,
+            content_type="application/json",
+            body=body_bytes,
+            headers={"x-loki-fault": f"auth_{status}"},
+        )
+
+    def evict_session_cookies(self, page_or_context: Union[Page, BrowserContext]) -> int:
+        """
+        Evicts all cookies from the current browser context mid-session,
+        testing frontend resilience to sudden session loss.
+        """
+        try:
+            context = page_or_context.context if hasattr(page_or_context, "context") else page_or_context
+            cookies = context.cookies()
+            count = len(cookies)
+            context.clear_cookies()
+            event = ApiFaultEvent(
+                url="document.cookies",
+                method="COOKIE",
+                fault_type="cookie_eviction",
+                details={"cleared_cookies_count": count},
+            )
+            self.injected_faults.append(event)
+            return count
+        except Exception:
+            return 0
+
+    def sniff_white_screen_or_freeze(self, page: Page) -> Optional[Dict[str, Any]]:
+        """
+        Detects silent frontend failures caused by unhandled auth drops or API faults:
+        - Completely blank page (white screen)
+        - Infinite loading spinner stuck without content
+        - Collapsed/unmounted application root element (#root, #app)
+        """
+        try:
+            return page.evaluate("""() => {
+                const bodyText = (document.body.innerText || '').trim();
+                const buttons = document.querySelectorAll('button:visible, a:visible, input:visible').length;
+
+                // 1. Completely empty body
+                if (bodyText.length === 0 && buttons === 0) {
+                    return {
+                        type: "white_screen",
+                        reason: "Page body is completely blank (0 visible elements and empty text).",
+                    };
+                }
+
+                // 2. Infinite loading spinner without content
+                const spinners = document.querySelectorAll('.spinner, .loading, [role="progressbar"], .loader, .lds-ring, #spinner');
+                if (spinners.length > 0 && bodyText.length < 30 && buttons === 0) {
+                    return {
+                        type: "infinite_spinner",
+                        reason: "Loading indicator remains permanently stuck with no content rendered.",
+                    };
+                }
+
+                // 3. Unhandled crash unmounted root container
+                const rootEl = document.getElementById('root') || document.getElementById('app') || document.getElementById('__next');
+                if (rootEl && rootEl.children.length === 0 && (rootEl.innerText || '').trim().length === 0) {
+                    return {
+                        type: "unmounted_root",
+                        reason: "Application root (#root / #app) is empty, indicating an unhandled unmount or crash.",
+                    };
+                }
+
+                return null;
+            }""")
+        except Exception:
+            return None
+
     def get_summary(self) -> Dict[str, Any]:
         """Returns statistical telemetry of all injected faults in the current session."""
         by_type: Dict[str, int] = {}
@@ -428,6 +601,21 @@ class ApiChaosEngine:
                     "url": fault.url,
                     "status": fault.injected_status or 500,
                     "body": fault.details.get("error_payload", {}),
+                })
+            elif fault.fault_type in ("401_unauthorized", "403_forbidden"):
+                mocks.append({
+                    "url": fault.url,
+                    "status": fault.injected_status or 401,
+                    "body": fault.details.get("error_payload", {}),
+                })
+            elif fault.fault_type in ("token_invalidation", "token_corruption"):
+                mocks.append({
+                    "url": fault.url,
+                    "status": 401,
+                    "body": {
+                        "error": "Unauthorized",
+                        "message": "Authentication token missing or invalid signature (LOKI repro)",
+                    },
                 })
             elif fault.fault_type == "empty_response":
                 mocks.append({
