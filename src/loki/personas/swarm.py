@@ -1,6 +1,6 @@
 import time
 import random
-from typing import List
+from typing import List, Dict, Any
 from playwright.sync_api import Page
 from src.loki.personas.base import BasePersona
 from src.loki.personas.rage_clicker import RageClickerPersona
@@ -14,7 +14,7 @@ class SwarmPersona(BasePersona):
     Orchestrates all chaos personas in coordinated multi-vector assault waves:
     - NoviceChaotic: Boundary input fuzzing, unicode, erratic keys.
     - Adversary: Unhiding/unlocking disabled controls, hidden field tampering, injection probes.
-    - NetworkTormentor: 3G latency throttling, mid-flight offline drops.
+    - NetworkTormentor: 3G latency throttling, mid-flight offline drops, and semantic API faults.
     - RageClicker: High-frequency concurrent click bursts and race condition probes.
     """
 
@@ -28,6 +28,10 @@ class SwarmPersona(BasePersona):
         self.network = NetworkTormentorPersona()
         self.rage = RageClickerPersona(click_burst_count=click_burst_count)
         self.sub_personas = [self.novice, self.adversary, self.network, self.rage]
+
+    def get_api_faults(self) -> List[Dict[str, Any]]:
+        """Returns all mock route definitions collected from sub-personas (e.g. NetworkTormentor)."""
+        return self.network.get_api_faults()
 
     def _sync_logs(self, persona: BasePersona):
         """Transfers recorded actions and replay trace from a sub-persona to the swarm."""

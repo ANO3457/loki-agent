@@ -31,6 +31,7 @@ class IncidentReport:
     # (a single page's JS event handlers never truly run concurrently).
     concurrency: int = 1
     concurrency_lanes: List[Dict[str, Any]] = field(default_factory=list)
+    api_faults: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_crashes(self) -> bool:
@@ -273,6 +274,8 @@ class ChaosSandbox:
                 else:
                     time.sleep(duration)
                 report.replay_trace = session_trace
+                if persona and hasattr(persona, "get_api_faults"):
+                    report.api_faults = persona.get_api_faults()
 
             except Error as e:
                 report.crashes.append(f"Navigation error: {str(e)}")

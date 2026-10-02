@@ -254,3 +254,77 @@ class TestSummaryAndRepro:
         assert len(repro) == 1
         assert repro[0]["url"] == "https://example.com/api/v1"
         assert repro[0]["status"] == 502
+
+
+class TestPersonaIntegration:
+    def test_network_tormentor_has_api_chaos(self):
+        from src.loki.personas.network_tormentor import NetworkTormentorPersona
+
+        persona = NetworkTormentorPersona()
+        assert hasattr(persona, "api_chaos")
+        assert hasattr(persona, "get_api_faults")
+        assert isinstance(persona.get_api_faults(), list)
+
+    def test_swarm_exposes_api_faults(self):
+        from src.loki.personas.swarm import SwarmPersona
+
+        swarm = SwarmPersona()
+        assert hasattr(swarm, "get_api_faults")
+        assert isinstance(swarm.get_api_faults(), list)
+
+
+class TestReporterReproIntegration:
+    def test_repro_script_contains_api_faults(self):
+        from src.loki.engine.sandbox import IncidentReport
+        from src.loki.engine.reporter import IncidentReporter
+
+        report = IncidentReport(
+            target_url="http://localhost:8080",
+            persona_name="NetworkTormentor",
+            crashes=["TypeError: Cannot read properties of undefined"],
+            api_faults=[
+                {
+                    "url": "http://localhost:8080/api/user",
+                    "status": 500,
+                    "body": {"error": "Internal Server Error"},
+                }
+            ],
+        )
+
+        reporter = IncidentReporter()
+        code = reporter._generate_repro_script(report)
+
+        assert "API_FAULTS = [{'url': 'http://localhost:8080/api/user', 'status': 500, 'body': {'error': 'Internal Server Error'}}]" in code
+        assert "page.route(f_url, _make_handler(f_status, f_body))" in code
+        assert "deterministic API mock routes" in code
+
+    def test_save_session_persists_api_faults(self, tmp_path):
+        from src.loki.engine.sandbox import IncidentReport
+        from src.loki.engine.reporter import IncidentReporter
+
+        report = IncidentReport(
+            target_url="http://localhost:8080",
+            persona_name="NetworkTormentor",
+            crashes=["TypeError: Cannot read properties of undefined"],
+            api_faults=[
+                {
+                    "url": "http://localhost:8080/api/data",
+                    "status": 503,
+                    "body": {"error": "Unavailable"},
+                }
+            ],
+        )
+
+        reporter = IncidentReporter(base_output_dir=str(tmp_path))
+        run_dir = reporter.save_session(report)
+
+        incident_file = run_dir / "incident.json"
+        assert incident_file.exists()
+
+        with open(incident_file, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+
+        assert "api_faults" in metadata
+        assert len(metadata["api_faults"]) == 1
+        assert metadata["api_faults"][0]["status"] == 503
+

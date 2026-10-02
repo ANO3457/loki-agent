@@ -1,21 +1,28 @@
 import time
 import random
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from playwright.sync_api import Page
 from src.loki.personas.base import BasePersona
+from src.loki.engine.api_chaos import ApiChaosEngine, ApiChaosConfig
 
 
 class NetworkTormentorPersona(BasePersona):
     """
     Simulates hostile network environments: extreme latency (slow 3G),
-    sudden offline connection drops mid-transaction, and aborted API requests.
+    sudden offline connection drops mid-transaction, and semantic API faults
+    (5xx errors, corrupted JSON, dropped keys, surgical latency).
     """
 
-    def __init__(self):
+    def __init__(self, api_chaos_config: Optional[ApiChaosConfig] = None):
         super().__init__(
             name="NetworkTormentor",
-            description="Injects high network latency, sudden connection loss, and aborted HTTP requests to expose UI hangs.",
+            description="Injects high network latency, sudden connection loss, and semantic API fault corruption to expose UI hangs.",
         )
+        self.api_chaos = ApiChaosEngine(api_chaos_config or ApiChaosConfig())
+
+    def get_api_faults(self) -> List[Dict[str, Any]]:
+        """Returns mock route definitions for all API faults injected during the run."""
+        return self.api_chaos.generate_repro_routes()
 
     def _apply_slow_network(self, page: Page, latency_ms: int = 1500):
         """Emulates slow network conditions using Chrome DevTools Protocol if available."""
@@ -65,77 +72,100 @@ class NetworkTormentorPersona(BasePersona):
         # Step 1: Throttle network to Slow 3G
         self._apply_slow_network(page, latency_ms=1200)
 
+        # Step 2: Attach Ghost in the Wire semantic API fault interception
+        self.api_chaos.attach(page)
+        self.log_action("Activated Ghost in the Wire: Semantic API fault injection active")
+
         step = 0
-        while time.time() - start_time < duration:
-            step += 1
-            try:
-                # Find interactive buttons or inputs
-                buttons = page.query_selector_all("button:visible, input[type='submit']:visible, a:visible")
-                valid_buttons = [b for b in buttons if b.is_enabled()]
+        try:
+            while time.time() - start_time < duration:
+                step += 1
+                try:
+                    # Find interactive buttons or inputs
+                    buttons = page.query_selector_all("button:visible, input[type='submit']:visible, a:visible")
+                    valid_buttons = [b for b in buttons if b.is_enabled()]
 
-                if valid_buttons:
-                    target_btn = random.choice(valid_buttons)
-                    btn_text = (target_btn.text_content() or "Action Button").strip()[:30]
-                    selector = self.resilient_selector(target_btn)
+                    if valid_buttons:
+                        target_btn = random.choice(valid_buttons)
+                        btn_text = (target_btn.text_content() or "Action Button").strip()[:30]
+                        selector = self.resilient_selector(target_btn)
+                        mode = step % 3
 
-                    # Variant A: Trigger click then immediately cut the connection (offline drop mid-flight)
-                    if step % 2 == 1:
-                        self.log_action(f"Triggering action on '{btn_text}' under high latency")
-                        target_btn.click(timeout=1000, no_wait_after=True, force=True)
-                        if selector:
-                            self.record_step("click", selector=selector, force=True)
+                        # Variant A: Trigger click then immediately cut the connection (offline drop mid-flight)
+                        if mode == 0:
+                            self.log_action(f"Triggering action on '{btn_text}' under high latency")
+                            target_btn.click(timeout=1000, no_wait_after=True, force=True)
+                            if selector:
+                                self.record_step("click", selector=selector, force=True)
 
-                        # Sudden connection loss during request in-flight
-                        page.wait_for_timeout(200)
-                        self.log_action("💥 Pulling the plug: Simulated sudden offline connection drop")
+                            # Sudden connection loss during request in-flight
+                            page.wait_for_timeout(200)
+                            self.log_action("💥 Pulling the plug: Simulated sudden offline connection drop")
+                            page.context.set_offline(True)
+                            self.record_step("offline", value=True)
+
+                            # Allow UI 1.5s to react to offline state
+                            page.wait_for_timeout(1500)
+
+                            # Restore connectivity
+                            self.log_action("Reconnecting network (offline -> online recovery)")
+                            page.context.set_offline(False)
+                            self.record_step("offline", value=False)
+                            page.wait_for_timeout(500)
+
+                        # Variant B: Rapid repeated clicks while connection is recovering
+                        elif mode == 1:
+                            self.log_action(f"Stressing '{btn_text}' during network recovery")
+                            if selector:
+                                self.record_step("click", selector=selector, force=True, repeat=3, delay_ms=150)
+                            for _ in range(3):
+                                target_btn.click(timeout=800, no_wait_after=True, force=True)
+                                page.wait_for_timeout(150)
+
+                        # Variant C: Semantic API fault injection burst
+                        else:
+                            faults_before = len(self.api_chaos.injected_faults)
+                            self.log_action(f"⚡ Testing '{btn_text}' under semantic API fault fuzzing")
+                            target_btn.click(timeout=1000, no_wait_after=True, force=True)
+                            if selector:
+                                self.record_step("click", selector=selector, force=True)
+                            page.wait_for_timeout(600)
+                            new_faults = self.api_chaos.injected_faults[faults_before:]
+                            for f in new_faults:
+                                self.log_action(f"⚡ Injected {f.fault_type} into {f.url}")
+                                self.record_step("api_fault", fault_type=f.fault_type, url=f.url, status=f.injected_status)
+
+                    else:
+                        # If no buttons, simulate offline toggle on page
+                        self.log_action("Toggling offline mode during idle page state")
                         page.context.set_offline(True)
                         self.record_step("offline", value=True)
-
-                        # Allow UI 1.5s to react to offline state
-                        page.wait_for_timeout(1500)
-
-                        # Restore connectivity
-                        self.log_action("Reconnecting network (offline -> online recovery)")
+                        page.wait_for_timeout(1000)
                         page.context.set_offline(False)
                         self.record_step("offline", value=False)
-                        page.wait_for_timeout(500)
 
-                    # Variant B: Rapid repeated clicks while connection is recovering
-                    else:
-                        self.log_action(f"Stressing '{btn_text}' during network recovery")
-                        if selector:
-                            self.record_step("click", selector=selector, force=True, repeat=3, delay_ms=150)
-                        for _ in range(3):
-                            target_btn.click(timeout=800, no_wait_after=True, force=True)
-                            page.wait_for_timeout(150)
+                    page.wait_for_timeout(500)
 
-                else:
-                    # If no buttons, simulate offline toggle on page
-                    self.log_action("Toggling offline mode during idle page state")
-                    page.context.set_offline(True)
-                    self.record_step("offline", value=True)
-                    page.wait_for_timeout(1000)
-                    page.context.set_offline(False)
-                    self.record_step("offline", value=False)
+                except Exception as e:
+                    self.log_action(f"Network assault cycle encountered: {str(e)[:40]}")
+                    page.wait_for_timeout(500)
 
-                page.wait_for_timeout(500)
-
-            except Exception as e:
-                self.log_action(f"Network assault cycle encountered: {str(e)[:40]}")
-                page.wait_for_timeout(500)
-
-        # Cleanup: Ensure page is left in normal online state
-        self._reset_network(page)
-        self.log_action("Finished NetworkTormentor assault session")
+        finally:
+            # Cleanup: Ensure routes are detached and network restored to normal
+            self.api_chaos.detach()
+            self._reset_network(page)
+            self.log_action("Finished NetworkTormentor assault session")
 
     def attack_step(self, page: Page, step: dict):
-        """Mutates a recorded journey step by dropping the network during execution."""
+        """Mutates a recorded journey step by dropping the network or injecting API faults."""
         event_type = step.get("action") or step.get("type")
         selector = step.get("selector")
         target_name = step.get("value") or step.get("text") or step.get("id") or selector
 
         if event_type == "click":
-            self.log_action(f"NetworkTormentor: Intercepting step '{target_name}' with mid-click offline drop")
+            self.api_chaos.attach(page)
+            faults_before = len(self.api_chaos.injected_faults)
+            self.log_action(f"NetworkTormentor: Intercepting step '{target_name}' with API chaos & offline drop")
             try:
                 el = page.query_selector(selector)
                 if el:
@@ -149,9 +179,15 @@ class NetworkTormentorPersona(BasePersona):
                     page.context.set_offline(False)
                     self.record_step("offline", value=False)
                     self.log_action("Restored connection following journey click")
+
+                    new_faults = self.api_chaos.injected_faults[faults_before:]
+                    for f in new_faults:
+                        self.record_step("api_fault", fault_type=f.fault_type, url=f.url, status=f.injected_status)
             except Exception as e:
                 self.log_action(f"Error during journey step attack: {e}")
                 try:
                     page.context.set_offline(False)
                 except Exception:
                     pass
+            finally:
+                self.api_chaos.detach()
