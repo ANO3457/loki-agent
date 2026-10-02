@@ -1,0 +1,445 @@
+"""
+LOKI API Chaos & Semantic Fault Injection Engine (Ghost in the Wire).
+
+Provides surgical network-level fault injection for modern web apps:
+- HTTP Status Code Injection (500, 502, 503, 504)
+- JSON Payload Corruption (semantic fuzzing, type mutation, null values)
+- Schema / Property Stripping (hunting missing optional chaining ?. crashes)
+- Surgical Latency Spikes on specific data endpoints
+- Empty Response Fuzzing
+"""
+
+import fnmatch
+import json
+import random
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from urllib.parse import urlparse
+
+from playwright.sync_api import BrowserContext, Page, Request, Route
+
+
+@dataclass
+class ApiChaosConfig:
+    """Configuration options for the API Chaos Engine."""
+    enabled: bool = True
+    fault_rate: float = 0.3  # Probability [0.0 - 1.0] of injecting fault into an eligible request
+    fault_types: List[str] = field(default_factory=lambda: [
+        "status_code",
+        "corrupt_json",
+        "delay",
+        "empty_response",
+        "schema_strip",
+    ])
+    status_codes: List[int] = field(default_factory=lambda: [500, 502, 503, 504])
+    delay_range_ms: Tuple[int, int] = (1500, 3500)
+    api_patterns: List[str] = field(default_factory=lambda: [
+        "**/api/**",
+        "**/graphql**",
+        "**/v1/**",
+        "**/v2/**",
+        "**/v3/**",
+        "**/rest/**",
+        "**/services/**",
+        "**/*.json*",
+    ])
+    ignored_extensions: List[str] = field(default_factory=lambda: [
+        ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+        ".woff", ".woff2", ".ttf", ".eot", ".ico", ".map", ".html"
+    ])
+    monster_string_len: int = 5000
+
+
+@dataclass
+class ApiFaultEvent:
+    """Record of a single injected API fault for telemetry and reproduction."""
+    url: str
+    method: str
+    fault_type: str  # "status_code", "corrupt_json", "delay", "empty_response", "schema_strip"
+    original_status: Optional[int] = None
+    injected_status: Optional[int] = None
+    details: Dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "url": self.url,
+            "method": self.method,
+            "fault_type": self.fault_type,
+            "original_status": self.original_status,
+            "injected_status": self.injected_status,
+            "details": self.details,
+            "timestamp": self.timestamp,
+        }
+
+
+def mutate_json_payload(data: Any, monster_len: int = 5000) -> Any:
+    """
+    Recursively and semantically corrupts a JSON data structure:
+    - Mutates numbers to NaN/huge numbers or None
+    - Mutates strings to giant monster strings or None
+    - Inverts booleans
+    - Empties arrays or injects null elements
+    """
+    if isinstance(data, dict):
+        if not data:
+            return {"_corrupted_by_loki": True}
+        mutated = {}
+        for k, v in data.items():
+            roll = random.random()
+            if roll < 0.20:
+                # Replace with None
+                mutated[k] = None
+            elif roll < 0.40:
+                # Type mutation
+                if isinstance(v, (int, float)):
+                    mutated[k] = "NaN"
+                elif isinstance(v, str):
+                    mutated[k] = "X" * min(monster_len, 2000)
+                elif isinstance(v, bool):
+                    mutated[k] = not v
+                elif isinstance(v, list):
+                    mutated[k] = []
+                elif isinstance(v, dict):
+                    mutated[k] = None
+                else:
+                    mutated[k] = None
+            elif roll < 0.60:
+                # Recursive descent
+                mutated[k] = mutate_json_payload(v, monster_len)
+            else:
+                # Keep original value
+                mutated[k] = v
+        return mutated
+
+    elif isinstance(data, list):
+        if not data:
+            return [{"_corrupted_item": True}]
+        roll = random.random()
+        if roll < 0.35:
+            # Empty list
+            return []
+        elif roll < 0.70:
+            # Nullify elements
+            return [None if random.random() < 0.5 else mutate_json_payload(x, monster_len) for x in data]
+        else:
+            return [mutate_json_payload(x, monster_len) for x in data]
+
+    elif isinstance(data, (int, float)):
+        return -999999 if random.random() < 0.5 else None
+
+    elif isinstance(data, str):
+        return "M" * min(monster_len, 1000) if random.random() < 0.5 else None
+
+    elif isinstance(data, bool):
+        return not data
+
+    return None
+
+
+def strip_schema_keys(data: Any) -> Tuple[Any, List[str]]:
+    """
+    Strips top-level or critical keys from JSON to expose missing optional chaining (?.),
+    returning the modified data and the list of stripped keys.
+    """
+    if isinstance(data, dict):
+        if not data:
+            return {}, []
+        keys = list(data.keys())
+        # Pick 1 to 3 keys to drop
+        drop_count = max(1, min(len(keys), 2))
+        keys_to_drop = random.sample(keys, drop_count)
+        stripped = {k: v for k, v in data.items() if k not in keys_to_drop}
+        return stripped, keys_to_drop
+    elif isinstance(data, list):
+        return [], ["_all_items_stripped"]
+    return {}, ["_root_data_stripped"]
+
+
+class ApiChaosEngine:
+    """
+    Orchestrates live network route interception in Playwright pages/contexts
+    to inject semantic API faults, payload corruption, and latency spikes.
+    """
+
+    def __init__(self, config: Optional[ApiChaosConfig] = None):
+        self.config = config or ApiChaosConfig()
+        self.injected_faults: List[ApiFaultEvent] = []
+        self._attached_targets: Set[Union[Page, BrowserContext]] = set()
+
+    def is_eligible(self, request: Request) -> bool:
+        """Determines if an outgoing network request is eligible for API chaos injection."""
+        url = request.url.lower()
+
+        # Ignore non-HTTP protocols (data:, blob:, chrome:)
+        if not url.startswith(("http://", "https://")):
+            return False
+
+        # Exclude static assets
+        parsed_url = urlparse(url)
+        path = parsed_url.path.lower()
+        for ext in self.config.ignored_extensions:
+            if path.endswith(ext):
+                return False
+
+        # Check resource type (fetch, xhr)
+        resource_type = request.resource_type.lower()
+        if resource_type in ("fetch", "xhr"):
+            return True
+
+        # Check against API URL patterns
+        for pattern in self.config.api_patterns:
+            if fnmatch.fnmatch(url, pattern.lower()) or fnmatch.fnmatch(path, pattern.lower()):
+                return True
+
+        return False
+
+    def attach(self, target: Union[Page, BrowserContext]) -> None:
+        """Attaches route interception to a Playwright Page or BrowserContext."""
+        if not self.config.enabled:
+            return
+
+        def _route_handler(route: Route, request: Request):
+            self._handle_route(route, request)
+
+        target.route("**/*", _route_handler)
+        self._attached_targets.add(target)
+
+    def detach(self) -> None:
+        """Detaches route interception from all attached pages and contexts."""
+        for target in list(self._attached_targets):
+            try:
+                target.unroute("**/*")
+            except Exception:
+                pass
+        self._attached_targets.clear()
+
+    def reset(self) -> None:
+        """Clears all recorded fault events."""
+        self.injected_faults.clear()
+
+    def _handle_route(self, route: Route, request: Request) -> None:
+        """Intercepts an individual route and decides whether and how to inject chaos."""
+        try:
+            if not self.config.enabled or not self.is_eligible(request):
+                route.continue_()
+                return
+
+            # Random roll against fault_rate
+            if random.random() > self.config.fault_rate:
+                route.continue_()
+                return
+
+            # Choose fault type
+            fault_type = random.choice(self.config.fault_types) if self.config.fault_types else "status_code"
+
+            if fault_type == "status_code":
+                self._inject_status_code(route, request)
+            elif fault_type == "corrupt_json":
+                self._inject_corrupt_json(route, request)
+            elif fault_type == "delay":
+                self._inject_delay(route, request)
+            elif fault_type == "empty_response":
+                self._inject_empty_response(route, request)
+            elif fault_type == "schema_strip":
+                self._inject_schema_strip(route, request)
+            else:
+                route.continue_()
+
+        except Exception:
+            # Failsafe: if interception logic throws, never hang the browser
+            try:
+                route.continue_()
+            except Exception:
+                pass
+
+    def _inject_status_code(self, route: Route, request: Request) -> None:
+        """Injects a 5xx HTTP server or gateway error."""
+        status = random.choice(self.config.status_codes)
+        error_payload = {
+            "error": "LOKI Synthetic Fault Injection",
+            "message": f"Simulated HTTP {status} fault injected by LOKI Ghost in the Wire",
+            "status": status,
+            "timestamp": time.time(),
+        }
+        body_bytes = json.dumps(error_payload).encode("utf-8")
+
+        event = ApiFaultEvent(
+            url=request.url,
+            method=request.method,
+            fault_type="status_code",
+            injected_status=status,
+            details={"error_payload": error_payload},
+        )
+        self.injected_faults.append(event)
+
+        route.fulfill(
+            status=status,
+            content_type="application/json",
+            body=body_bytes,
+            headers={"x-loki-fault": f"status_code_{status}"},
+        )
+
+    def _inject_corrupt_json(self, route: Route, request: Request) -> None:
+        """Fetches the real API response and corrupts the JSON body semantically."""
+        try:
+            response = route.fetch()
+            body_bytes = response.body()
+            content_type = response.headers.get("content-type", "").lower()
+
+            try:
+                parsed_json = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                # Not valid JSON, fulfill with original
+                route.fulfill(response=response)
+                return
+
+            corrupted_data = mutate_json_payload(parsed_json, self.config.monster_string_len)
+            corrupted_bytes = json.dumps(corrupted_data).encode("utf-8")
+
+            event = ApiFaultEvent(
+                url=request.url,
+                method=request.method,
+                fault_type="corrupt_json",
+                original_status=response.status,
+                injected_status=response.status,
+                details={
+                    "original_keys": list(parsed_json.keys()) if isinstance(parsed_json, dict) else len(parsed_json),
+                    "corrupted_preview": str(corrupted_data)[:150],
+                },
+            )
+            self.injected_faults.append(event)
+
+            # Preserve original headers but update content-length
+            headers = dict(response.headers)
+            headers["content-length"] = str(len(corrupted_bytes))
+            headers["x-loki-fault"] = "corrupt_json"
+
+            route.fulfill(
+                response=response,
+                body=corrupted_bytes,
+                headers=headers,
+            )
+        except Exception:
+            route.continue_()
+
+    def _inject_delay(self, route: Route, request: Request) -> None:
+        """Injects targeted artificial latency into an individual API endpoint."""
+        min_ms, max_ms = self.config.delay_range_ms
+        delay_ms = random.randint(min_ms, max_ms)
+        time.sleep(delay_ms / 1000.0)
+
+        event = ApiFaultEvent(
+            url=request.url,
+            method=request.method,
+            fault_type="delay",
+            details={"delay_ms": delay_ms},
+        )
+        self.injected_faults.append(event)
+
+        # After delay, fetch and fulfill naturally
+        try:
+            response = route.fetch()
+            headers = dict(response.headers)
+            headers["x-loki-fault"] = f"delayed_{delay_ms}ms"
+            route.fulfill(response=response, headers=headers)
+        except Exception:
+            route.continue_()
+
+    def _inject_empty_response(self, route: Route, request: Request) -> None:
+        """Fulfills the request with an empty JSON object or array."""
+        empty_body = b"{}"
+        event = ApiFaultEvent(
+            url=request.url,
+            method=request.method,
+            fault_type="empty_response",
+            injected_status=200,
+            details={"body": "{}"},
+        )
+        self.injected_faults.append(event)
+
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=empty_body,
+            headers={"x-loki-fault": "empty_response"},
+        )
+
+    def _inject_schema_strip(self, route: Route, request: Request) -> None:
+        """Fetches the real response and strips essential schema keys."""
+        try:
+            response = route.fetch()
+            body_bytes = response.body()
+
+            try:
+                parsed_json = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                route.fulfill(response=response)
+                return
+
+            stripped_data, dropped_keys = strip_schema_keys(parsed_json)
+            stripped_bytes = json.dumps(stripped_data).encode("utf-8")
+
+            event = ApiFaultEvent(
+                url=request.url,
+                method=request.method,
+                fault_type="schema_strip",
+                original_status=response.status,
+                injected_status=response.status,
+                details={"dropped_keys": dropped_keys},
+            )
+            self.injected_faults.append(event)
+
+            headers = dict(response.headers)
+            headers["content-length"] = str(len(stripped_bytes))
+            headers["x-loki-fault"] = f"stripped_keys_{','.join(dropped_keys)}"
+
+            route.fulfill(
+                response=response,
+                body=stripped_bytes,
+                headers=headers,
+            )
+        except Exception:
+            route.continue_()
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Returns statistical telemetry of all injected faults in the current session."""
+        by_type: Dict[str, int] = {}
+        for f in self.injected_faults:
+            by_type[f.fault_type] = by_type.get(f.fault_type, 0) + 1
+
+        return {
+            "total_faults_injected": len(self.injected_faults),
+            "faults_by_type": by_type,
+            "attacked_endpoints": list({f.url for f in self.injected_faults}),
+            "events": [f.to_dict() for f in self.injected_faults],
+        }
+
+    def generate_repro_routes(self) -> List[Dict[str, Any]]:
+        """
+        Produces serializable mock route descriptions for deterministic reproduction
+        in repro_test.py.
+        """
+        mocks = []
+        for fault in self.injected_faults:
+            if fault.fault_type == "status_code":
+                mocks.append({
+                    "url": fault.url,
+                    "status": fault.injected_status or 500,
+                    "body": fault.details.get("error_payload", {}),
+                })
+            elif fault.fault_type == "empty_response":
+                mocks.append({
+                    "url": fault.url,
+                    "status": 200,
+                    "body": {},
+                })
+            elif fault.fault_type in ("corrupt_json", "schema_strip"):
+                mocks.append({
+                    "url": fault.url,
+                    "status": fault.original_status or 200,
+                    "fault_type": fault.fault_type,
+                    "details": fault.details,
+                })
+        return mocks
