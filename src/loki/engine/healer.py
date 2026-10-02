@@ -76,6 +76,23 @@ class CodeHealer:
 
         source_code = target_file.read_text(encoding="utf-8")
         crashes = incident_data.get("crashes", [])
+        api_faults = incident_data.get("api_faults", [])
+        layout_issues = incident_data.get("layout_issues", [])
+
+        api_context = ""
+        if api_faults or layout_issues:
+            api_context = "\nInjected API & Session Disruptions (Ghost in the Wire):\n"
+            if api_faults:
+                for f in api_faults[:6]:
+                    method = f.get("method", "GET")
+                    url = f.get("url", "")
+                    ftype = f.get("fault_type", "fault")
+                    status = f.get("injected_status")
+                    st = f" (Status {status})" if status else ""
+                    api_context += f"- [{method}] {url} -> {ftype}{st}\n"
+            if layout_issues:
+                for issue in layout_issues:
+                    api_context += f"- {issue}\n"
 
         prompt = f"""You are LOKI's Autonomous Code Self-Healing Engine.
 A real-world chaos test crashed the target web application.
@@ -85,15 +102,15 @@ Target File: `{target_file}`
 Target URL: {incident_data.get('target_url')}
 Unhandled Crashes Detected:
 {json.dumps(crashes, indent=2)}
-
+{api_context}
 Full Source Code of `{target_file}`:
 ```
 {source_code}
 ```
 
 Instructions:
-1. Identify the exact lines of code that cause or allow the unhandled crash (e.g. lack of debounce, race condition, missing null check, event listener firing twice).
-2. Propose a minimal surgical replacement.
+1. Identify the exact lines of code that cause or allow the unhandled crash or UI freeze (e.g. lack of debounce, race condition, missing null check, event listener firing twice, or unhandled rejection/missing defensive handling for failing API responses).
+2. Propose a minimal surgical replacement. If the crash was triggered by an API failure (500s, corrupt payloads, stripped keys, 401s), ensure defensive error handling (e.g. try/catch, optional chaining, checking res.ok, setting an error banner state, or resetting loading state on failure).
 3. You MUST respond with ONLY a valid JSON object matching this exact schema:
 {{
   "target_file": "{target_file}",

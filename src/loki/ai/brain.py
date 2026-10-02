@@ -49,6 +49,31 @@ class AIBrain:
             except (OSError, UnicodeDecodeError):
                 source_context = ""
 
+        api_faults_context = ""
+        api_faults = incident_data.get("api_faults", [])
+        layout_issues = incident_data.get("layout_issues", [])
+        if api_faults or layout_issues:
+            api_faults_context = "\n### Injected API & Session Chaos (Ghost in the Wire):\n"
+            if api_faults:
+                api_faults_context += f"- Injected Fault Events ({len(api_faults)}):\n"
+                for f in api_faults[:8]:
+                    ftype = f.get("fault_type", "fault")
+                    method = f.get("method", "GET")
+                    url = f.get("url", "")
+                    status = f.get("injected_status")
+                    st_str = f" (HTTP {status})" if status else ""
+                    api_faults_context += f"  * [{method}] {url} -> {ftype}{st_str}\n"
+            if layout_issues:
+                api_faults_context += "- UI Anomalies / Freezes:\n"
+                for issue in layout_issues:
+                    api_faults_context += f"  * {issue}\n"
+            api_faults_context += (
+                "\n*Correlation Note:* If unhandled exceptions, promise rejections, or blank screens coincide with "
+                "injected API faults (500s, corrupt payloads, stripped schema keys, 401s), diagnose whether the frontend "
+                "lacks defensive error handling (e.g. missing optional chaining `?.`, unhandled promise rejection, "
+                "missing `.catch()` / `try...catch`, or lack of fallback UI state).\n"
+            )
+
         prompt = f"""You are LOKI, an elite AI Chaos & Software Quality Engineer.
 Analyze this real-world application crash and synthesize a precise diagnosis and fix.
 
@@ -58,12 +83,12 @@ Analyze this real-world application crash and synthesize a precise diagnosis and
 - Unhandled Crashes: {json.dumps(incident_data.get('crashes'), indent=2)}
 - HTTP Errors: {json.dumps(incident_data.get('http_errors'), indent=2)}
 - Attacker Actions: {incident_data.get('actions_executed_count')} actions recorded
-{source_context}
+{api_faults_context}{source_context}
 
 Please provide your answer with the following structure:
-1. **Root Cause Analysis**: Explain why the crash occurred in 2-3 sentences.
+1. **Root Cause Analysis**: Explain why the crash occurred in 2-3 sentences (highlighting if missing API error handling or session recovery triggered the crash).
 2. **Impact Assessment**: What risks does this pose in production?
-3. **Recommended Fix**: Provide the exact code diff or corrected code snippet to prevent this failure (e.g. debouncing, disabling button, idempotency lock).
+3. **Recommended Fix**: Provide the exact code diff or corrected code snippet to prevent this failure (e.g. debouncing, disabling button, optional chaining, try/catch, error boundary, fallback UI).
 """
 
         # Any LiteLLM-compatible provider works here — not just Gemini/OpenAI/Anthropic.

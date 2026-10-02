@@ -526,4 +526,190 @@ class TestCliAndConfigIntegration:
         assert captured.get("auth_chaos") is False
 
 
+class TestHtmlTelemetryAndAiDiagnosis:
+    def test_html_reporter_with_api_faults(self, tmp_path):
+        from src.loki.engine.html_reporter import HTMLReporter
+
+        report_data = {
+            "run_id": "run_test_api_chaos",
+            "target_url": "http://example.com",
+            "duration_seconds": 3.5,
+            "persona": "NetworkTormentor",
+            "actions_taken": ["Step 1", "Step 2"],
+            "api_faults": [
+                {
+                    "url": "http://example.com/api/orders",
+                    "method": "POST",
+                    "fault_type": "500_internal_server_error",
+                    "injected_status": 500,
+                    "details": {"strategy": "500_internal_server_error"},
+                },
+                {
+                    "url": "http://example.com/api/user",
+                    "method": "GET",
+                    "fault_type": "token_invalidation",
+                    "details": {"stripped_keys": ["Authorization"]},
+                },
+            ],
+            "layout_issues": [],
+        }
+
+        out_html = tmp_path / "report.html"
+        HTMLReporter.generate(report_data, out_html)
+        content = out_html.read_text(encoding="utf-8")
+
+        assert "Ghost in the Wire: API &amp; Session Chaos Telemetry" in content or "Ghost in the Wire: API & Session Chaos Telemetry" in content
+        assert "Injected API Faults" in content
+        assert "500_internal_server_error" in content
+        assert "token_invalidation" in content
+        assert "http://example.com/api/orders" in content
+        assert "UI Resilience Verified" in content
+
+    def test_html_reporter_with_ui_freeze_anomaly(self, tmp_path):
+        from src.loki.engine.html_reporter import HTMLReporter
+
+        report_data = {
+            "run_id": "run_test_freeze",
+            "target_url": "http://example.com",
+            "duration_seconds": 2.0,
+            "persona": "NetworkTormentor",
+            "actions_taken": ["Click"],
+            "api_faults": [
+                {
+                    "url": "http://example.com/api/profile",
+                    "method": "GET",
+                    "fault_type": "401_unauthorized",
+                    "injected_status": 401,
+                    "details": {},
+                }
+            ],
+            "layout_issues": [
+                "[UI Freeze / Blank Screen] type=white_screen reason=Page body is completely blank"
+            ],
+        }
+
+        out_html = tmp_path / "report.html"
+        HTMLReporter.generate(report_data, out_html)
+        content = out_html.read_text(encoding="utf-8")
+
+        assert "Critical UI Freeze / Blank Screen Sniffed!" in content
+        assert "white_screen" in content
+
+    def test_ai_brain_prompt_includes_api_chaos_context(self, tmp_path, monkeypatch):
+        import json
+        from src.loki.ai.brain import AIBrain
+
+        run_dir = tmp_path / "run_20261002_test"
+        run_dir.mkdir(parents=True)
+        incident_file = run_dir / "incident.json"
+        incident_file.write_text(
+            json.dumps({
+                "target_url": "http://localhost:8000",
+                "persona": "NetworkTormentor",
+                "crashes": ["TypeError: Cannot read properties of undefined (reading 'token')"],
+                "http_errors": [],
+                "actions_executed_count": 5,
+                "api_faults": [
+                    {
+                        "method": "GET",
+                        "url": "http://localhost:8000/api/auth",
+                        "fault_type": "token_corruption",
+                        "injected_status": 401,
+                    }
+                ],
+                "layout_issues": [
+                    "[UI Freeze / Blank Screen] type=white_screen"
+                ],
+            }),
+            encoding="utf-8",
+        )
+
+        sent_prompts = []
+
+        class MockChoice:
+            message = type("Msg", (), {"content": "1. Root Cause: Corrupted token caused unhandled exception"})()
+
+        class MockResponse:
+            choices = [MockChoice()]
+
+        def mock_completion(*args, **kwargs):
+            messages = kwargs.get("messages", [])
+            if messages:
+                sent_prompts.append(messages[0]["content"])
+            return MockResponse()
+
+        monkeypatch.setattr("litellm.completion", mock_completion)
+
+        brain = AIBrain(runs_dir=str(tmp_path))
+        result = brain.diagnose_and_fix(run_id=run_dir.name)
+
+        assert "error" not in result
+        assert len(sent_prompts) == 1
+        prompt = sent_prompts[0]
+        assert "### Injected API & Session Chaos (Ghost in the Wire):" in prompt
+        assert "token_corruption" in prompt
+        assert "white_screen" in prompt
+
+    def test_code_healer_prompt_includes_api_context(self, tmp_path, monkeypatch):
+        import json
+        from src.loki.engine.healer import CodeHealer
+
+        dummy_src = tmp_path / "checkout.js"
+        dummy_src.write_text("function checkout() { fetch('/api/pay'); }", encoding="utf-8")
+
+        run_dir = tmp_path / "run_healer_test"
+        run_dir.mkdir(parents=True)
+        incident_file = run_dir / "incident.json"
+        incident_file.write_text(
+            json.dumps({
+                "target_url": "http://localhost:8000",
+                "persona": "NetworkTormentor",
+                "crashes": [f"Error in {dummy_src.name}: Failed to fetch"],
+                "api_faults": [
+                    {
+                        "method": "POST",
+                        "url": "http://localhost:8000/api/pay",
+                        "fault_type": "500_internal_server_error",
+                        "injected_status": 500,
+                    }
+                ],
+                "layout_issues": [],
+            }),
+            encoding="utf-8",
+        )
+
+        sent_prompts = []
+
+        class MockChoice:
+            message = type("Msg", (), {
+                "content": json.dumps({
+                    "target_file": str(dummy_src),
+                    "explanation": "Added try/catch around pay fetch",
+                    "original_snippet": "fetch('/api/pay');",
+                    "replacement_snippet": "try { await fetch('/api/pay'); } catch(e) { showError(e); }",
+                })
+            })()
+
+        class MockResponse:
+            choices = [MockChoice()]
+
+        def mock_completion(*args, **kwargs):
+            messages = kwargs.get("messages", [])
+            if messages:
+                sent_prompts.append(messages[0]["content"])
+            return MockResponse()
+
+        monkeypatch.setattr("litellm.completion", mock_completion)
+
+        healer = CodeHealer(runs_dir=str(tmp_path))
+        patch_result = healer.synthesize_patch(run_dir)
+
+        assert patch_result.get("success") is True
+        assert len(sent_prompts) == 1
+        prompt = sent_prompts[0]
+        assert "Injected API & Session Disruptions (Ghost in the Wire):" in prompt
+        assert "500_internal_server_error" in prompt
+
+
+
 

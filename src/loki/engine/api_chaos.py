@@ -596,38 +596,23 @@ class ApiChaosEngine:
         """
         mocks = []
         for fault in self.injected_faults:
+            item = fault.to_dict()
             if fault.fault_type == "status_code":
-                mocks.append({
-                    "url": fault.url,
-                    "status": fault.injected_status or 500,
-                    "body": fault.details.get("error_payload", {}),
-                })
+                item["status"] = fault.injected_status or 500
+                item["body"] = fault.details.get("error_payload", {})
             elif fault.fault_type in ("401_unauthorized", "403_forbidden"):
-                mocks.append({
-                    "url": fault.url,
-                    "status": fault.injected_status or 401,
-                    "body": fault.details.get("error_payload", {}),
-                })
+                item["status"] = fault.injected_status or 401
+                item["body"] = fault.details.get("error_payload", {})
             elif fault.fault_type in ("token_invalidation", "token_corruption"):
-                mocks.append({
-                    "url": fault.url,
-                    "status": 401,
-                    "body": {
-                        "error": "Unauthorized",
-                        "message": "Authentication token missing or invalid signature (LOKI repro)",
-                    },
-                })
+                item["status"] = 401
+                item["body"] = {
+                    "error": "Unauthorized",
+                    "message": "Authentication token missing or invalid signature (LOKI repro)",
+                }
             elif fault.fault_type == "empty_response":
-                mocks.append({
-                    "url": fault.url,
-                    "status": 200,
-                    "body": {},
-                })
+                item["status"] = 200
+                item["body"] = {}
             elif fault.fault_type in ("corrupt_json", "schema_strip"):
-                mocks.append({
-                    "url": fault.url,
-                    "status": fault.original_status or 200,
-                    "fault_type": fault.fault_type,
-                    "details": fault.details,
-                })
+                item["status"] = fault.original_status or 200
+            mocks.append(item)
         return mocks

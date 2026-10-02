@@ -102,6 +102,17 @@ class HTMLReporter:
             </div>
             """
 
+        # API Chaos stat card
+        api_faults = data.get("api_faults", [])
+        api_stat_card = ""
+        if api_faults:
+            api_stat_card = f"""
+            <div class="stat-card">
+                <div class="stat-label">Injected API Faults</div>
+                <div class="stat-value" style="color: var(--accent-yellow);">⚡ {len(api_faults)}</div>
+            </div>
+            """
+
         # Mobile & Responsive layout audit section
         layout_html = ""
         if device:
@@ -166,6 +177,109 @@ class HTMLReporter:
                     </thead>
                     <tbody>
                         {lane_rows}
+                    </tbody>
+                </table>
+            </div>
+            """
+
+        # Ghost in the Wire: API & Session Chaos Telemetry
+        api_faults = data.get("api_faults", [])
+        api_chaos_html = ""
+        freeze_issues = [x for x in layout_issues if "[UI Freeze" in str(x) or "Blank Screen" in str(x)]
+        if api_faults or freeze_issues:
+            freeze_banner = ""
+            if freeze_issues:
+                lis = "".join(f"<li>{html.escape(str(issue))}</li>" for issue in freeze_issues)
+                freeze_banner = f"""
+                <div style="background-color: rgba(248, 81, 73, 0.15); border-left: 4px solid var(--accent-red); padding: 14px 18px; border-radius: 6px; margin-bottom: 16px;">
+                    <strong style="color: var(--accent-red);">⚠ Critical UI Freeze / Blank Screen Sniffed!</strong>
+                    <p style="margin: 6px 0 0 0; color: #f0f6fc; font-size: 13px;">
+                        The client application failed gracefully: unhandled promise rejections, unmounted component trees, or an infinite spinner were detected following API disruption.
+                    </p>
+                    <ul style="margin-top: 8px; margin-bottom: 0; padding-left: 20px; font-size: 12px; font-family: monospace; color: #ff7b72;">
+                        {lis}
+                    </ul>
+                </div>
+                """
+            elif api_faults:
+                freeze_banner = """
+                <div style="background-color: rgba(63, 185, 80, 0.1); border-left: 4px solid var(--accent-green); padding: 10px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; color: var(--accent-green);">
+                    🛡️ UI Resilience Verified: Application maintained DOM rendering integrity without unmounting or infinite loading during semantic API faults.
+                </div>
+                """
+
+            type_counts: Dict[str, int] = {}
+            for f in api_faults:
+                ft = str(f.get("fault_type") or f.get("strategy") or "API Fault")
+                type_counts[ft] = type_counts.get(ft, 0) + 1
+
+            pill_badges = " ".join(
+                f'<span class="badge badge-warning" style="margin-right: 6px; font-size: 11px;">{html.escape(k)}: {v}</span>'
+                for k, v in type_counts.items()
+            )
+
+            fault_rows = ""
+            for f in api_faults:
+                method = html.escape(str(f.get("method", "GET")))
+                url = html.escape(str(f.get("url", "")))
+                ftype = html.escape(str(f.get("fault_type") or f.get("strategy") or "API Fault"))
+                status = f.get("injected_status") or f.get("status")
+                if status:
+                    status_cls = "badge-danger" if status >= 500 else ("badge-warning" if status >= 400 else "badge-success")
+                    status_html = f'<span class="badge {status_cls}">{status}</span>'
+                else:
+                    status_html = '<span class="badge badge-warning">Mutated</span>'
+
+                details_obj = f.get("details", {})
+                if isinstance(details_obj, dict):
+                    if "stripped_keys" in details_obj:
+                        details_str = f"Stripped keys: <code>{html.escape(str(details_obj['stripped_keys']))}</code>"
+                    elif "strategy" in details_obj:
+                        details_str = f"Strategy: <code>{html.escape(str(details_obj['strategy']))}</code>"
+                    elif "error_payload" in details_obj:
+                        details_str = f"Payload: <code>{html.escape(json.dumps(details_obj['error_payload']))}</code>"
+                    elif "mutated_keys" in details_obj:
+                        details_str = f"Mutated keys: <code>{html.escape(str(details_obj['mutated_keys']))}</code>"
+                    else:
+                        details_str = f"<code>{html.escape(json.dumps(details_obj)[:100])}</code>"
+                else:
+                    details_str = html.escape(str(details_obj)[:100])
+
+                fault_rows += f"""
+                <tr>
+                    <td style="font-weight: bold; font-family: monospace;">{method}</td>
+                    <td style="text-align: center;">{status_html}</td>
+                    <td style="font-family: monospace; font-size: 12px; color: var(--accent-yellow);">{ftype}</td>
+                    <td style="font-family: monospace; font-size: 12px; word-break: break-all;">{url}</td>
+                    <td style="font-size: 12px; color: #8b949e;">{details_str}</td>
+                </tr>
+                """
+
+            if not fault_rows:
+                fault_rows = '<tr><td colspan="5" style="text-align: center; color: #8b949e; padding: 16px;">Zero in-flight network faults recorded.</td></tr>'
+
+            api_chaos_html = f"""
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                    <h2 style="margin: 0;">⚡ Ghost in the Wire: API & Session Chaos Telemetry</h2>
+                    <div>{pill_badges}</div>
+                </div>
+                <p style="color: var(--text-dim); font-size: 13px; margin-top: 0; margin-bottom: 14px;">
+                    Synthetic in-flight semantic fault injection intercepted network traffic to verify frontend fault tolerance, auth token recovery, and error boundary resilience.
+                </p>
+                {freeze_banner}
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 8%;">Method</th>
+                            <th style="width: 10%; text-align: center;">Injected</th>
+                            <th style="width: 20%;">Fault Vector</th>
+                            <th style="width: 32%;">Target Endpoint</th>
+                            <th style="width: 30%;">Mutation / Payload Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {fault_rows}
                     </tbody>
                 </table>
             </div>
@@ -453,6 +567,7 @@ class HTMLReporter:
                 <div class="stat-value">{persona}</div>
             </div>
             {device_stat_card}
+            {api_stat_card}
             <div class="stat-card">
                 <div class="stat-label">Session Duration</div>
                 <div class="stat-value">{duration}</div>
@@ -466,6 +581,7 @@ class HTMLReporter:
         {video_html}
         {layout_html}
         {concurrency_html}
+        {api_chaos_html}
 
         <div class="card">
             <h2>📋 Business Rules Verification Scorecard</h2>
