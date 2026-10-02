@@ -216,3 +216,56 @@ def resolve_ai_connection(explicit_model: Optional[str] = None) -> Dict[str, Any
             kwargs["api_key"] = api_key
 
     return kwargs
+
+
+def resolve_api_chaos_config(
+    cli_enabled: Optional[bool] = None,
+    fault_rate: Optional[float] = None,
+    auth_chaos: Optional[bool] = None,
+) -> Any:
+    """
+    Builds an ApiChaosConfig by overlaying CLI arguments on top of .loki/config.yaml
+    `api_chaos:` section and sensible defaults.
+    """
+    from src.loki.engine.api_chaos import ApiChaosConfig
+
+    yaml_cfg = load_loki_config().get("api_chaos") or {}
+
+    # Enabled resolution: CLI flag > yaml config > default (True)
+    if cli_enabled is not None:
+        enabled = cli_enabled
+    elif "enabled" in yaml_cfg:
+        enabled = bool(yaml_cfg["enabled"])
+    else:
+        enabled = True
+
+    # Fault rate resolution: CLI flag > yaml config > default (0.3)
+    if fault_rate is not None:
+        rate = fault_rate
+    elif "fault_rate" in yaml_cfg:
+        rate = float(yaml_cfg["fault_rate"])
+    else:
+        rate = 0.3
+
+    # Auth chaos resolution: CLI flag > yaml config > default (True)
+    if auth_chaos is not None:
+        auth_enabled = auth_chaos
+    elif "auth_chaos" in yaml_cfg:
+        auth_enabled = bool(yaml_cfg["auth_chaos"])
+    else:
+        auth_enabled = True
+
+    status_codes = yaml_cfg.get("status_codes") or [500, 502, 503, 504]
+    api_patterns = yaml_cfg.get("api_patterns") or [
+        "**/api/**", "**/graphql**", "**/v1/**", "**/v2/**", "**/v3/**",
+        "**/rest/**", "**/services/**", "**/*.json*"
+    ]
+
+    return ApiChaosConfig(
+        enabled=enabled,
+        fault_rate=rate,
+        auth_chaos_enabled=auth_enabled,
+        status_codes=status_codes,
+        api_patterns=api_patterns,
+    )
+

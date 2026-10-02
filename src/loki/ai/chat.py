@@ -312,6 +312,7 @@ class LokiChatSession:
             rules=True, report_html=True, open_report=False, ci=False,
             strict=False, auto_heal=False, device=None, orientation="portrait",
             concurrency=1, target_selector=None, authorized=False,
+            api_chaos=None, fault_rate=None, auth_chaos=None,
         )
 
         i = 0
@@ -392,6 +393,23 @@ class LokiChatSession:
                 kwargs["auto_heal"] = True
             elif low == "--authorized":
                 kwargs["authorized"] = True
+            elif low == "--api-chaos":
+                kwargs["api_chaos"] = True
+            elif low == "--no-api-chaos":
+                kwargs["api_chaos"] = False
+            elif low == "--fault-rate":
+                v = _next_value()
+                if v is None:
+                    return
+                try:
+                    kwargs["fault_rate"] = float(v)
+                except ValueError:
+                    self.console.print(f"[yellow]--fault-rate expects a float number, got '{v}'[/yellow]")
+                    return
+            elif low == "--auth-chaos":
+                kwargs["auth_chaos"] = True
+            elif low == "--no-auth-chaos":
+                kwargs["auth_chaos"] = False
             elif not t.startswith("-") and url is None:
                 url = t
             else:
@@ -505,6 +523,8 @@ class LokiChatSession:
             "/run": {
                 "--persona": None, "--swarm": None, "--device": None, "--journey": None,
                 "--concurrency": None, "--auto-heal": None, "--headed": None, "--no-rules": None,
+                "--api-chaos": None, "--no-api-chaos": None, "--fault-rate": None,
+                "--auth-chaos": None, "--no-auth-chaos": None,
             },
             "/fix": {"--apply": None, "--yes": None, "--no-verify": None, "--model": None},
             "/report": {"--no-open": None},

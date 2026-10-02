@@ -1,7 +1,8 @@
 import time
 import random
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from playwright.sync_api import Page
+from src.loki.engine.api_chaos import ApiChaosConfig
 from src.loki.personas.base import BasePersona
 from src.loki.personas.rage_clicker import RageClickerPersona
 from src.loki.personas.novice_chaotic import NoviceChaoticPersona
@@ -18,14 +19,14 @@ class SwarmPersona(BasePersona):
     - RageClicker: High-frequency concurrent click bursts and race condition probes.
     """
 
-    def __init__(self, click_burst_count: int = 5):
+    def __init__(self, click_burst_count: int = 5, api_chaos_config: Optional[ApiChaosConfig] = None):
         super().__init__(
             name="Swarm",
             description="Coordinates all chaos personas in multi-vector assault waves against the target application.",
         )
         self.novice = NoviceChaoticPersona()
         self.adversary = AdversaryPersona()
-        self.network = NetworkTormentorPersona()
+        self.network = NetworkTormentorPersona(api_chaos_config=api_chaos_config)
         self.rage = RageClickerPersona(click_burst_count=click_burst_count)
         self.sub_personas = [self.novice, self.adversary, self.network, self.rage]
 

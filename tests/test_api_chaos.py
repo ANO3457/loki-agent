@@ -459,3 +459,71 @@ class TestAuthChaos:
         assert routes[1]["status"] == 401
 
 
+class TestCliAndConfigIntegration:
+    def test_resolve_api_chaos_config_defaults(self, monkeypatch):
+        from src.loki.config import resolve_api_chaos_config
+
+        monkeypatch.setattr("src.loki.config.load_loki_config", lambda: {})
+        cfg = resolve_api_chaos_config()
+        assert cfg.enabled is True
+        assert cfg.fault_rate == 0.3
+        assert cfg.auth_chaos_enabled is True
+
+    def test_resolve_api_chaos_config_yaml_overlay(self, monkeypatch):
+        from src.loki.config import resolve_api_chaos_config
+
+        monkeypatch.setattr(
+            "src.loki.config.load_loki_config",
+            lambda: {
+                "api_chaos": {
+                    "enabled": False,
+                    "fault_rate": 0.75,
+                    "auth_chaos": False,
+                    "status_codes": [503],
+                }
+            },
+        )
+        cfg = resolve_api_chaos_config()
+        assert cfg.enabled is False
+        assert cfg.fault_rate == 0.75
+        assert cfg.auth_chaos_enabled is False
+        assert cfg.status_codes == [503]
+
+    def test_resolve_api_chaos_config_cli_precedence(self, monkeypatch):
+        from src.loki.config import resolve_api_chaos_config
+
+        monkeypatch.setattr(
+            "src.loki.config.load_loki_config",
+            lambda: {"api_chaos": {"enabled": False, "fault_rate": 0.2, "auth_chaos": False}},
+        )
+        cfg = resolve_api_chaos_config(cli_enabled=True, fault_rate=0.9, auth_chaos=True)
+        assert cfg.enabled is True
+        assert cfg.fault_rate == 0.9
+        assert cfg.auth_chaos_enabled is True
+
+    def test_swarm_accepts_api_chaos_config(self):
+        from src.loki.personas.swarm import SwarmPersona
+
+        custom_cfg = ApiChaosConfig(fault_rate=0.99, auth_chaos_enabled=False)
+        swarm = SwarmPersona(api_chaos_config=custom_cfg)
+        assert swarm.network.api_chaos.config.fault_rate == 0.99
+        assert swarm.network.api_chaos.config.auth_chaos_enabled is False
+
+    def test_chat_handle_run_command_api_chaos_flags(self, monkeypatch):
+        from src.loki.ai.chat import LokiChatSession
+
+        captured = {}
+
+        def mock_run_cli_action(self, description, fn, **kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(LokiChatSession, "_run_cli_action", mock_run_cli_action)
+        session = LokiChatSession()
+
+        session._handle_run_command("http://localhost:8000 --api-chaos --fault-rate 0.65 --no-auth-chaos")
+        assert captured.get("api_chaos") is True
+        assert captured.get("fault_rate") == 0.65
+        assert captured.get("auth_chaos") is False
+
+
+

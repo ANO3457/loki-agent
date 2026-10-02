@@ -58,6 +58,14 @@ chaos:
   default_persona: rage-clicker
   click_burst_count: 5
 
+# Ghost in the Wire: Network-level API semantic fault injection
+api_chaos:
+  enabled: true
+  fault_rate: 0.3
+  auth_chaos: true
+  auth_fault_rate: 0.4
+
+
 # AI Brain: runs on LiteLLM, so ANY LiteLLM-compatible provider works here, not
 # just Gemini/OpenAI/Anthropic. Uncomment one block below (or write your own) —
 # see https://docs.litellm.ai/docs/providers for the full provider list.

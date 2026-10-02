@@ -6,6 +6,12 @@ target:
 chaos:
   default_persona: rage-clicker
   click_burst_count: 5
+api_chaos:
+  enabled: true
+  fault_rate: 0.3
+  auth_chaos: true
+  auth_fault_rate: 0.4
 ai:
   provider: gemini
   model: gemini-flash-latest
+

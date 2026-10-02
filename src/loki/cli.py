@@ -16,7 +16,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import webbrowser
 from src.loki import __version__
-from src.loki.config import load_loki_config
+from src.loki.config import load_loki_config, resolve_api_chaos_config
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
@@ -438,6 +438,21 @@ def run(
         help="Confirms you own this target or have explicit permission to test it. Required (or an "
              "interactive confirmation) for any non-localhost URL; skips that prompt for scripted/CI use.",
     ),
+    api_chaos: Optional[bool] = typer.Option(
+        None,
+        "--api-chaos/--no-api-chaos",
+        help="Enable or disable API semantic fault injection (500s, corrupt JSON, schema stripping)",
+    ),
+    fault_rate: Optional[float] = typer.Option(
+        None,
+        "--fault-rate",
+        help="Probability (0.0 to 1.0) of injecting faults into eligible API requests (default: 0.3)",
+    ),
+    auth_chaos: Optional[bool] = typer.Option(
+        None,
+        "--auth-chaos/--no-auth-chaos",
+        help="Enable or disable mid-flight auth token invalidation and cookie eviction (default: enabled)",
+    ),
 ):
     """Execute a monitored chaos attack on a target URL to sniff for crashes and errors."""
     is_ci_mode = ci or strict or CIGate.is_ci_environment()
@@ -480,15 +495,22 @@ def run(
         except ValueError:
             persona = PersonaChoice.RAGE_CLICKER
 
+    # Resolve API Chaos configuration
+    api_chaos_config = resolve_api_chaos_config(
+        cli_enabled=api_chaos,
+        fault_rate=fault_rate,
+        auth_chaos=auth_chaos,
+    )
+
     active_persona = None
     if swarm or persona in [PersonaChoice.SWARM, PersonaChoice.ALL]:
-        active_persona = SwarmPersona(click_burst_count=burst_count)
+        active_persona = SwarmPersona(click_burst_count=burst_count, api_chaos_config=api_chaos_config)
     elif persona == PersonaChoice.RAGE_CLICKER:
         active_persona = RageClickerPersona(click_burst_count=burst_count)
     elif persona == PersonaChoice.NOVICE_CHAOTIC:
         active_persona = NoviceChaoticPersona()
     elif persona == PersonaChoice.NETWORK_TORMENTOR:
-        active_persona = NetworkTormentorPersona()
+        active_persona = NetworkTormentorPersona(api_chaos_config=api_chaos_config)
     elif persona == PersonaChoice.ADVERSARY:
         active_persona = AdversaryPersona()
 
@@ -503,6 +525,12 @@ def run(
     console.print(f"[bold magenta]🎭 Active Persona:[/bold magenta] {persona_label}")
     if device:
         console.print(f"[bold green]📱 Requested Device:[/bold green] {device} ({orientation})")
+    if api_chaos_config.enabled and (swarm or persona in [PersonaChoice.SWARM, PersonaChoice.ALL, PersonaChoice.NETWORK_TORMENTOR]):
+        auth_status = "on" if api_chaos_config.auth_chaos_enabled else "off"
+        console.print(
+            f"[bold magenta]⚡ API Chaos (Ghost in the Wire):[/bold magenta] Active "
+            f"[dim](rate: {int(api_chaos_config.fault_rate * 100)}%, auth chaos: {auth_status})[/dim]"
+        )
 
     sandbox = ChaosSandbox(headless=target_config.get("headless", True) and not headed)
 
@@ -550,6 +578,17 @@ def run(
             console.print(f"  [dim]•[/dim] {action}")
         if len(report.actions_taken) > 5:
             console.print(f"  [dim]... and {len(report.actions_taken) - 5} more actions.[/dim]")
+
+    if report.api_faults:
+        console.print(f"\n[bold yellow]⚡ Injected API Faults ({len(report.api_faults)}):[/bold yellow]")
+        for f in report.api_faults[:5]:
+            ftype = f.get("fault_type", "fault")
+            url = f.get("url", "unknown")
+            status = f.get("status")
+            status_str = f" [status {status}]" if status else ""
+            console.print(f"  [dim]•[/dim] [cyan]{ftype}[/cyan] -> [dim]{url}[/dim]{status_str}")
+        if len(report.api_faults) > 5:
+            console.print(f"  [dim]... and {len(report.api_faults) - 5} more injected faults.[/dim]")
     # 3. Business Rules Evaluation via AI
     evaluations = None
     rules_file = Path(".loki/rules.md")
