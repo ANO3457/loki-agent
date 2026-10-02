@@ -167,9 +167,12 @@ def perform_update(console: Console) -> bool:
             except Exception:
                 pass
 
+        my_pid = os.getpid()
         cmd_str = (
             f'Write-Host "🔄 Updating LOKI via uv..." -ForegroundColor Cyan; '
-            f'Start-Sleep -Seconds 2; '
+            f'Wait-Process -Id {my_pid} -Timeout 6 -ErrorAction SilentlyContinue; '
+            f'Start-Sleep -Seconds 1; '
+            f'Get-Process | Where-Object {{ $_.Path -like "*uv\\tools\\loki-chaos-agent*" }} | Stop-Process -Force -ErrorAction SilentlyContinue; '
             f'& "{uv_bin}" tool upgrade loki-chaos-agent; '
             f'if ($LASTEXITCODE -ne 0) {{ & "{uv_bin}" tool install --force git+https://github.com/{GITHUB_REPO}.git }}; '
             f'Write-Host "`n✔ LOKI updated successfully! Press any key to close..." -ForegroundColor Green; '
@@ -180,9 +183,9 @@ def perform_update(console: Console) -> bool:
                 ["powershell", "-NoProfile", "-Command", cmd_str],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
-            console.print("[bold green]✔ Updater window launched. Exiting LOKI...[/bold green]")
-            time.sleep(0.5)
-            sys.exit(0)
+            console.print("[bold green]✔ External updater launched. Exiting LOKI to release file locks...[/bold green]")
+            time.sleep(0.3)
+            os._exit(0)
         except Exception as e:
             console.print(f"[bold red]Could not launch external updater:[/bold red] {e}")
             console.print("Please exit LOKI and run in your terminal:")
