@@ -23,7 +23,7 @@ A total of **14 actionable findings** and **2 architectural observations** are d
 | ID | Title | Module | Severity | Status |
 |:---|:---|:---|:---:|:---:|
 | **SEC-01** | SSRF / Authorization Bypass via Backslash Discrepancy | `src/loki/safety.py` | 🔴 **Critical** | ✅ **Resolved** |
-| **ENG-01** | Route Hanging via Invalid `continue_()` Post-`fetch()` | `src/loki/engine/api_chaos.py` | 🔴 **Critical** | Open |
+| **ENG-01** | Route Hanging via Invalid `continue_()` Post-`fetch()` | `src/loki/engine/api_chaos.py` | 🔴 **Critical** | ✅ **Resolved** |
 | **SEC-03** | Sensitive Credential & PII Leak in HAR Response Bodies | `src/loki/engine/scrubber.py` | 🟠 **High** | ✅ **Resolved** |
 | **REP-02** | False-Positive "Crash Reproduced" on Internal Script Errors in `repro_test.py` | `src/loki/engine/replayer.py` | 🟠 **High** | Open |
 | **CHA-01** | Persistent Offline Network Leak on Unhandled Exceptions | `src/loki/personas/network_tormentor.py` | 🟠 **High** | Open |
@@ -60,7 +60,8 @@ A total of **14 actionable findings** and **2 architectural observations** are d
 ---
 
 #### ENG-01: Route Hanging via Invalid `continue_()` Post-`fetch()`
-- **File**: `src/loki/engine/api_chaos.py` (lines 367–368, 390–391, 446–447)
+- **File**: `src/loki/engine/api_chaos.py` (lines 327–450)
+- **Status**: ✅ **Resolved in v1.9.1 preparation**
 - **Description**: In `ApiChaosEngine` (`_inject_corrupt_json`, `_inject_delay`, `_inject_schema_strip`), the interceptor first calls `response = route.fetch()` to retrieve the original API response from the server before mutating it. If an exception occurs after `route.fetch()`, the exception handler executes `route.continue_()`. 
   Playwright explicitly prohibits invoking `continue_()` on a route where `fetch()` has already been issued—Playwright requires `route.fulfill()`. The invalid `continue_()` call throws an unhandled error inside the failsafe handler, leaving the HTTP request permanently hanging. This triggers artificial test timeouts and false-positive UI freeze reports.
 - **Remediation**:

@@ -711,5 +711,91 @@ class TestHtmlTelemetryAndAiDiagnosis:
         assert "500_internal_server_error" in prompt
 
 
+class TestApiChaosRouteFetchFailsafe:
+    def test_corrupt_json_fulfills_with_response_when_exception_after_fetch(self, monkeypatch):
+        engine = ApiChaosEngine(config=ApiChaosConfig(enabled=True))
+        route = MagicMock()
+        mock_response = MagicMock()
+        mock_response.body.return_value = b'{"valid": "json"}'
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.status = 200
+        route.fetch.return_value = mock_response
 
+        # Force an exception during mutation
+        monkeypatch.setattr("src.loki.engine.api_chaos.mutate_json_payload", MagicMock(side_effect=RuntimeError("Mutation bomb")))
 
+        request = MagicMock()
+        request.url = "https://example.com/api/test"
+        request.method = "POST"
+
+        engine._inject_corrupt_json(route, request)
+
+        # Must fulfill with original response, NOT call continue_()
+        route.fulfill.assert_called_with(response=mock_response)
+        route.continue_.assert_not_called()
+
+    def test_corrupt_json_continues_when_fetch_itself_fails(self):
+        engine = ApiChaosEngine(config=ApiChaosConfig(enabled=True))
+        route = MagicMock()
+        route.fetch.side_effect = RuntimeError("Network error during fetch")
+
+        request = MagicMock()
+        request.url = "https://example.com/api/test"
+        request.method = "POST"
+
+        engine._inject_corrupt_json(route, request)
+
+        # Because fetch failed, route was never fetched, so continue_() is valid
+        route.continue_.assert_called_once()
+        route.fulfill.assert_not_called()
+
+    def test_delay_fulfills_with_response_when_exception_after_fetch(self, monkeypatch):
+        engine = ApiChaosEngine(config=ApiChaosConfig(enabled=True, delay_range_ms=(1, 2)))
+        route = MagicMock()
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "application/json"}
+        route.fetch.return_value = mock_response
+
+        # Force fulfill to fail on first attempt
+        first_call = True
+        def mock_fulfill(*args, **kwargs):
+            nonlocal first_call
+            if first_call:
+                first_call = False
+                raise RuntimeError("Fulfill header error")
+            return None
+
+        route.fulfill.side_effect = mock_fulfill
+
+        request = MagicMock()
+        request.url = "https://example.com/api/test"
+        request.method = "GET"
+
+        engine._inject_delay(route, request)
+
+        # Failsafe should fulfill with original response
+        route.continue_.assert_not_called()
+        assert route.fulfill.call_count == 2
+        route.fulfill.assert_called_with(response=mock_response)
+
+    def test_schema_strip_fulfills_with_response_when_exception_after_fetch(self, monkeypatch):
+        engine = ApiChaosEngine(config=ApiChaosConfig(enabled=True))
+        route = MagicMock()
+        mock_response = MagicMock()
+        mock_response.body.return_value = b'{"key": "value"}'
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.status = 200
+        route.fetch.return_value = mock_response
+
+        # Force an exception during strip_schema_keys
+        monkeypatch.setattr("src.loki.engine.api_chaos.strip_schema_keys", MagicMock(side_effect=RuntimeError("Strip error")))
+
+        request = MagicMock()
+        request.url = "https://example.com/api/test"
+        request.method = "GET"
+
+        engine._inject_schema_strip(route, request)
+
+        # Must fulfill with original response, NOT continue_()
+        route.fulfill.assert_called_with(response=mock_response)
+        route.continue_.assert_not_called()

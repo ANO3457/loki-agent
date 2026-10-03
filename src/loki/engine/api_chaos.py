@@ -326,6 +326,7 @@ class ApiChaosEngine:
 
     def _inject_corrupt_json(self, route: Route, request: Request) -> None:
         """Fetches the real API response and corrupts the JSON body semantically."""
+        response = None
         try:
             response = route.fetch()
             body_bytes = response.body()
@@ -365,7 +366,13 @@ class ApiChaosEngine:
                 headers=headers,
             )
         except Exception:
-            route.continue_()
+            try:
+                if response is not None:
+                    route.fulfill(response=response)
+                else:
+                    route.continue_()
+            except Exception:
+                pass
 
     def _inject_delay(self, route: Route, request: Request) -> None:
         """Injects targeted artificial latency into an individual API endpoint."""
@@ -382,13 +389,20 @@ class ApiChaosEngine:
         self.injected_faults.append(event)
 
         # After delay, fetch and fulfill naturally
+        response = None
         try:
             response = route.fetch()
             headers = dict(response.headers)
             headers["x-loki-fault"] = f"delayed_{delay_ms}ms"
             route.fulfill(response=response, headers=headers)
         except Exception:
-            route.continue_()
+            try:
+                if response is not None:
+                    route.fulfill(response=response)
+                else:
+                    route.continue_()
+            except Exception:
+                pass
 
     def _inject_empty_response(self, route: Route, request: Request) -> None:
         """Fulfills the request with an empty JSON object or array."""
@@ -411,6 +425,7 @@ class ApiChaosEngine:
 
     def _inject_schema_strip(self, route: Route, request: Request) -> None:
         """Fetches the real response and strips essential schema keys."""
+        response = None
         try:
             response = route.fetch()
             body_bytes = response.body()
@@ -444,7 +459,13 @@ class ApiChaosEngine:
                 headers=headers,
             )
         except Exception:
-            route.continue_()
+            try:
+                if response is not None:
+                    route.fulfill(response=response)
+                else:
+                    route.continue_()
+            except Exception:
+                pass
 
     def _inject_token_invalidation(self, route: Route, request: Request) -> None:
         """Strips authentication headers from the outgoing request in-flight."""
