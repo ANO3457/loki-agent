@@ -4,6 +4,7 @@ explicit permission to test it. Localhost is always allowed with no friction —
 everything else requires a one-time confirmation per host, persisted in
 `.loki/authorized_targets.json`, or the `--authorized` flag for scripted/CI use.
 """
+import ipaddress
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,15 +16,37 @@ LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
 
 def extract_host(url: str) -> str:
-    """Extracts the bare hostname from a target URL (or a bare hostname as-is)."""
-    candidate = url if "://" in url else f"http://{url}"
-    parsed = urlparse(candidate)
-    return (parsed.hostname or url).strip().lower()
+    """Extracts the bare hostname from a target URL (or a bare hostname as-is).
+    
+    Normalizes backslashes to forward slashes to align with WHATWG URL parsing
+    and browser (Chromium) navigation, preventing SSRF / authorization bypass via
+    URL parser discrepancies (e.g., http://evil.com\\@localhost).
+    """
+    if not url or not isinstance(url, str):
+        return ""
+    # Normalize backslashes to forward slashes (WHATWG URL compatibility)
+    sanitized = url.replace("\\", "/").strip()
+    candidate = sanitized if "://" in sanitized else f"http://{sanitized}"
+    try:
+        parsed = urlparse(candidate)
+        host = (parsed.hostname or sanitized).strip().lower()
+        return host.rstrip(".")
+    except Exception:
+        return sanitized.strip().lower()
 
 
 def is_local_host(url: str) -> bool:
     """True for localhost/loopback — always allowed, no authorization needed."""
-    return extract_host(url) in LOCAL_HOSTNAMES
+    host = extract_host(url)
+    if not host:
+        return False
+    if host in LOCAL_HOSTNAMES:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_unspecified
+    except ValueError:
+        return False
 
 
 def _load_authorized() -> Dict[str, Any]:

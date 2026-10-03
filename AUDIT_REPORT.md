@@ -1,4 +1,4 @@
-﻿# LOKI Architectural, Security & Robustness Audit Report
+# LOKI Architectural, Security & Robustness Audit Report
 
 **Date**: 2026-10-02  
 **Target Version**: LOKI v1.9.0  
@@ -22,7 +22,7 @@ A total of **14 actionable findings** and **2 architectural observations** are d
 
 | ID | Title | Module | Severity | Status |
 |:---|:---|:---|:---:|:---:|
-| **SEC-01** | SSRF / Authorization Bypass via Backslash Discrepancy | `src/loki/safety.py` | 🔴 **Critical** | Open |
+| **SEC-01** | SSRF / Authorization Bypass via Backslash Discrepancy | `src/loki/safety.py` | 🔴 **Critical** | ✅ **Resolved** |
 | **ENG-01** | Route Hanging via Invalid `continue_()` Post-`fetch()` | `src/loki/engine/api_chaos.py` | 🔴 **Critical** | Open |
 | **SEC-03** | Sensitive Credential & PII Leak in HAR Response Bodies | `src/loki/engine/scrubber.py` | 🟠 **High** | ✅ **Resolved** |
 | **REP-02** | False-Positive "Crash Reproduced" on Internal Script Errors in `repro_test.py` | `src/loki/engine/replayer.py` | 🟠 **High** | Open |
@@ -44,7 +44,8 @@ A total of **14 actionable findings** and **2 architectural observations** are d
 ### 🔴 Critical Severity
 
 #### SEC-01: SSRF / Authorization Bypass via Backslash Discrepancy
-- **File**: `src/loki/safety.py` (lines 17–22)
+- **File**: `src/loki/safety.py` (lines 17–44)
+- **Status**: ✅ **Resolved in v1.9.1 preparation**
 - **Description**: Python's `urllib.parse.urlparse` treats backslashes (`\`) differently from modern web browsers and Playwright (Chromium). When a target URL contains a backslash (e.g., `http://evil.com\@localhost`), `urlparse` interprets `evil.com\` as the username/userinfo component and `localhost` as the hostname. Consequently, `is_local_host(url)` evaluates to `True`, bypassing the target authorization guardrail. However, Chromium normalizes `\` to `/`, navigating to `http://evil.com/@localhost` and subjecting an unauthorized external target to chaos attacks.
 - **Remediation**:
   Normalize backslashes to forward slashes before parsing:
