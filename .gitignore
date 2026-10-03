@@ -19,6 +19,7 @@ dist/
 *.spec
 
 # LOKI local runs, videos, and evidence (keep local)
+temp_auto_push.bat
 .loki/runs/
 .loki/knowledge.json
 .loki/models.json
@@ -36,8 +37,8 @@ dist/
 Thumbs.db
 
 # IDE settings
-.vscode/
 .idea/
 
 # Others
-SPECIFICATION.md
+SPECIFICATION.md.gitignore
+branch_structure.json
