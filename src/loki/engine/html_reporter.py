@@ -4,6 +4,14 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 
+def _numeric_status(value: Any) -> Optional[int]:
+    """Return a numeric status, or None for unknown/synthetic telemetry."""
+    try:
+        return int(value)
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 class HTMLReporter:
     """Generates standalone, responsive HTML test reports with embedded replay video and AI scorecards."""
 
@@ -42,7 +50,7 @@ class HTMLReporter:
         rules_rows = ""
         if rules_evals:
             for r in rules_evals:
-                st = r.get("status", "UNKNOWN").upper()
+                st = str(r.get("status") or "UNKNOWN").upper()
                 if st == "PASSED":
                     badge = '<span class="badge badge-success">✔ PASSED</span>'
                 elif st == "VIOLATED":
@@ -145,7 +153,7 @@ class HTMLReporter:
             success_count = sum(
                 1 for lane in concurrency_lanes
                 for r in lane.get("responses", [])
-                if r.get("status", 0) < 400
+                if (status := _numeric_status(r.get("status"))) is not None and status < 400
             )
             lane_rows = ""
             for lane in concurrency_lanes:
@@ -224,9 +232,12 @@ class HTMLReporter:
                 url = html.escape(str(f.get("url", "")))
                 ftype = html.escape(str(f.get("fault_type") or f.get("strategy") or "API Fault"))
                 status = f.get("injected_status") or f.get("status")
-                if status:
-                    status_cls = "badge-danger" if status >= 500 else ("badge-warning" if status >= 400 else "badge-success")
-                    status_html = f'<span class="badge {status_cls}">{status}</span>'
+                numeric_status = _numeric_status(status)
+                if numeric_status is not None:
+                    status_cls = "badge-danger" if numeric_status >= 500 else ("badge-warning" if numeric_status >= 400 else "badge-success")
+                    status_html = f'<span class="badge {status_cls}">{numeric_status}</span>'
+                elif status:
+                    status_html = f'<span class="badge badge-warning">{html.escape(str(status))}</span>'
                 else:
                     status_html = '<span class="badge badge-warning">Mutated</span>'
 
