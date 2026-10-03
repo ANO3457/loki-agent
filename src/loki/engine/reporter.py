@@ -254,7 +254,13 @@ def test_reproduce_crash():
         sys.exit(0)
 
 if __name__ == "__main__":
-    test_reproduce_crash()
+    try:
+        test_reproduce_crash()
+    except Exception as e:
+        print(f"\\n❌ [LOKI REPRO ERROR] Test script execution failed: {{e}}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(2)
 '''
 
     def _generate_concurrent_repro_script(self, report: IncidentReport) -> str:
@@ -381,5 +387,11 @@ def test_reproduce_race_condition():
 
 
 if __name__ == "__main__":
-    test_reproduce_race_condition()
+    try:
+        test_reproduce_race_condition()
+    except Exception as e:
+        print(f"\\n❌ [LOKI REPRO ERROR] Test script execution failed: {{e}}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(2)
 '''
