@@ -35,16 +35,46 @@ class NetworkScrubber:
             r"secret",
             r"auth",
             r"password",
+            r"passwd",
             r"pwd",
             r"session",
             r"jwt",
             r"access_?token",
             r"refresh_?token",
+            r"id_?token",
             r"cvv",
             r"cvc",
             r"card",
+            r"credit_?card",
+            r"private_?key",
+            r"credential",
+            r"passcode",
+            r"\bpin\b",
+            r"ssn",
+            r"social_?security",
         ]
     ]
+
+    RAW_SENSITIVE_PATTERNS = [
+        # Standard JWT (header.payload.signature)
+        (re.compile(r"ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_.-]*)?"), "[REDACTED]"),
+        # Bearer tokens in text
+        (re.compile(r"(Bearer\s+)[A-Za-z0-9_\-\.\~+/=]{16,}", re.IGNORECASE), r"\1[REDACTED]"),
+        # PEM Private keys
+        (re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----[^-]+-----END [A-Z ]+PRIVATE KEY-----", re.DOTALL), "[REDACTED]"),
+        # Common API keys (OpenAI sk-, GitHub ghp_, Google AIza)
+        (re.compile(r"\b(?:sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[0-9A-Za-z-_]{35})\b"), "[REDACTED]"),
+    ]
+
+    @classmethod
+    def scrub_raw_text(cls, text: str) -> str:
+        """Redacts raw credentials, JWTs, and API tokens discovered in raw text."""
+        if not text or not isinstance(text, str):
+            return text
+        result = text
+        for pattern, replacement in cls.RAW_SENSITIVE_PATTERNS:
+            result = pattern.sub(replacement, result)
+        return result
 
     @classmethod
     def is_sensitive_key(cls, key: str) -> bool:
@@ -123,11 +153,13 @@ class NetworkScrubber:
         if text_content and isinstance(text_content, str):
             try:
                 data = json.loads(text_content)
-                if isinstance(data, dict):
-                    clean_dict = cls._scrub_dict(data)
-                    clean_post["text"] = json.dumps(clean_dict)
+                if isinstance(data, (dict, list)):
+                    clean_data = cls._scrub_json_data(data)
+                    clean_post["text"] = json.dumps(clean_data)
+                else:
+                    clean_post["text"] = cls.scrub_raw_text(text_content)
             except Exception:
-                pass
+                clean_post["text"] = cls.scrub_raw_text(text_content)
 
         # If post body params list exists
         params = clean_post.get("params")
@@ -144,19 +176,76 @@ class NetworkScrubber:
         return clean_post
 
     @classmethod
+    def scrub_response_content(cls, content: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Recursively scrubs sensitive parameters, tokens, and credentials in response body content."""
+        if not content or not isinstance(content, dict):
+            return content
+
+        clean_content = dict(content)
+        text_content = clean_content.get("text")
+        if not text_content or not isinstance(text_content, str):
+            return clean_content
+
+        is_base64 = clean_content.get("encoding") == "base64"
+        decoded_text = None
+        if is_base64:
+            try:
+                import base64
+                decoded_bytes = base64.b64decode(text_content)
+                decoded_text = decoded_bytes.decode("utf-8")
+            except Exception:
+                decoded_text = None
+
+        target_text = decoded_text if decoded_text is not None else text_content
+
+        # 1. Try parsing target_text as JSON
+        try:
+            data = json.loads(target_text)
+            if isinstance(data, (dict, list)):
+                clean_data = cls._scrub_json_data(data)
+                new_text = json.dumps(clean_data)
+                if is_base64 and decoded_text is not None:
+                    import base64
+                    clean_content["text"] = base64.b64encode(new_text.encode("utf-8")).decode("ascii")
+                else:
+                    clean_content["text"] = new_text
+                clean_content["size"] = len(clean_content["text"])
+                return clean_content
+        except Exception:
+            pass
+
+        # 2. If not valid JSON, scrub raw text for sensitive patterns (JWTs, api keys, Bearer tokens)
+        scrubbed_text = cls.scrub_raw_text(target_text)
+        if is_base64 and decoded_text is not None:
+            import base64
+            clean_content["text"] = base64.b64encode(scrubbed_text.encode("utf-8")).decode("ascii")
+        else:
+            clean_content["text"] = scrubbed_text
+        clean_content["size"] = len(clean_content["text"])
+
+        return clean_content
+
+    @classmethod
+    def _scrub_json_data(cls, data: Any) -> Any:
+        """Recursively scrubs sensitive keys and values in any JSON structure (dict, list, str)."""
+        if isinstance(data, dict):
+            new_dict = {}
+            for k, v in data.items():
+                if cls.is_sensitive_key(str(k)):
+                    new_dict[k] = "[REDACTED]"
+                else:
+                    new_dict[k] = cls._scrub_json_data(v)
+            return new_dict
+        elif isinstance(data, list):
+            return [cls._scrub_json_data(item) for item in data]
+        elif isinstance(data, str):
+            return cls.scrub_raw_text(data)
+        return data
+
+    @classmethod
     def _scrub_dict(cls, data: dict) -> dict:
-        """Recursively scrubs keys in a JSON object."""
-        new_data = {}
-        for k, v in data.items():
-            if cls.is_sensitive_key(k):
-                new_data[k] = "[REDACTED]"
-            elif isinstance(v, dict):
-                new_data[k] = cls._scrub_dict(v)
-            elif isinstance(v, list):
-                new_data[k] = [cls._scrub_dict(item) if isinstance(item, dict) else item for item in v]
-            else:
-                new_data[k] = v
-        return new_data
+        """Recursively scrubs keys in a JSON object (backward-compatibility alias)."""
+        return cls._scrub_json_data(data)
 
     @classmethod
     def scrub_har_data(cls, har_json: Dict[str, Any]) -> Dict[str, Any]:
@@ -191,6 +280,10 @@ class NetworkScrubber:
             # 6. Scrub response cookies
             if "cookies" in res:
                 res["cookies"] = cls.scrub_cookies(res["cookies"])
+
+            # 7. Scrub response body content
+            if "content" in res:
+                res["content"] = cls.scrub_response_content(res["content"])
 
         return har_json
 

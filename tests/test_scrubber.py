@@ -270,3 +270,130 @@ class TestScrubHarDataAndFile:
         non_existent = tmp_path / "non_existent.har"
         output_path = tmp_path / "out.har"
         assert NetworkScrubber.scrub_har_file(non_existent, output_path) is None
+
+
+class TestScrubResponseContent:
+    def test_scrub_response_content_none(self):
+        assert NetworkScrubber.scrub_response_content(None) is None
+
+    def test_scrub_response_content_json_dict(self):
+        payload = {
+            "id": 42,
+            "name": "Jane Doe",
+            "token": "secret_jwt_token_12345",
+            "access_token": "access_xyz",
+            "refresh_token": "refresh_abc",
+            "user": {
+                "username": "janedoe",
+                "password": "hashed_or_plain_password",
+                "api_key": "api_secret_key",
+            },
+            "meta": {"status": "ok", "count": 1},
+        }
+        content = {
+            "size": 500,
+            "mimeType": "application/json",
+            "text": json.dumps(payload),
+        }
+        scrubbed = NetworkScrubber.scrub_response_content(content)
+        assert scrubbed is not None
+        parsed = json.loads(scrubbed["text"])
+
+        # Preserved non-sensitive fields
+        assert parsed["id"] == 42
+        assert parsed["name"] == "Jane Doe"
+        assert parsed["user"]["username"] == "janedoe"
+        assert parsed["meta"]["status"] == "ok"
+
+        # Redacted sensitive credentials
+        assert parsed["token"] == "[REDACTED]"
+        assert parsed["access_token"] == "[REDACTED]"
+        assert parsed["refresh_token"] == "[REDACTED]"
+        assert parsed["user"]["password"] == "[REDACTED]"
+        assert parsed["user"]["api_key"] == "[REDACTED]"
+
+    def test_scrub_response_content_json_list(self):
+        payload = [
+            {"id": 1, "token": "tok1", "title": "First"},
+            {"id": 2, "secret": "sec2", "title": "Second"},
+        ]
+        content = {
+            "size": 100,
+            "mimeType": "application/json",
+            "text": json.dumps(payload),
+        }
+        scrubbed = NetworkScrubber.scrub_response_content(content)
+        parsed = json.loads(scrubbed["text"])
+        assert parsed[0]["token"] == "[REDACTED]"
+        assert parsed[0]["title"] == "First"
+        assert parsed[1]["secret"] == "[REDACTED]"
+        assert parsed[1]["title"] == "Second"
+
+    def test_scrub_response_content_base64_json(self):
+        import base64
+        payload = {"token": "super_secret_base64_token", "public_id": 99}
+        raw_json = json.dumps(payload)
+        b64_str = base64.b64encode(raw_json.encode("utf-8")).decode("ascii")
+
+        content = {
+            "size": len(b64_str),
+            "mimeType": "application/json",
+            "text": b64_str,
+            "encoding": "base64",
+        }
+        scrubbed = NetworkScrubber.scrub_response_content(content)
+        decoded = base64.b64decode(scrubbed["text"]).decode("utf-8")
+        parsed = json.loads(decoded)
+        assert parsed["token"] == "[REDACTED]"
+        assert parsed["public_id"] == 99
+
+    def test_scrub_response_content_raw_jwt_and_bearer(self):
+        jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        raw_html = f"<html><body>Welcome! Auth Bearer {jwt_token}</body></html>"
+        content = {
+            "size": len(raw_html),
+            "mimeType": "text/html",
+            "text": raw_html,
+        }
+        scrubbed = NetworkScrubber.scrub_response_content(content)
+        assert jwt_token not in scrubbed["text"]
+        assert "[REDACTED]" in scrubbed["text"]
+
+    def test_scrub_har_data_scrubs_response_body(self):
+        har_data = {
+            "log": {
+                "version": "1.2",
+                "entries": [
+                    {
+                        "request": {
+                            "method": "GET",
+                            "url": "https://example.com/api/profile",
+                            "headers": [],
+                            "cookies": [],
+                        },
+                        "response": {
+                            "status": 200,
+                            "headers": [{"name": "Content-Type", "value": "application/json"}],
+                            "cookies": [],
+                            "content": {
+                                "mimeType": "application/json",
+                                "text": json.dumps({
+                                    "user_id": 101,
+                                    "token": "session_tok_999",
+                                    "client_secret": "my_client_secret_xyz",
+                                    "role": "admin",
+                                }),
+                            },
+                        },
+                    }
+                ],
+            }
+        }
+        sanitized = NetworkScrubber.scrub_har_data(har_data)
+        res_text = sanitized["log"]["entries"][0]["response"]["content"]["text"]
+        parsed = json.loads(res_text)
+        assert parsed["user_id"] == 101
+        assert parsed["role"] == "admin"
+        assert parsed["token"] == "[REDACTED]"
+        assert parsed["client_secret"] == "[REDACTED]"
+

@@ -1,0 +1,238 @@
+﻿# LOKI Architectural, Security & Robustness Audit Report
+
+**Date**: 2026-10-02  
+**Target Version**: LOKI v1.9.0  
+**Audit Scope**: Core Engine, Network Interception, Chaos Personas, Sandboxing, AI Brain, Self-Healing (`CodeHealer`), Target Safety, HTML Reporter, and Chat REPL.
+
+---
+
+## Executive Summary
+
+An exhaustive, multi-agent line-by-line code audit was conducted across the entire LOKI codebase. The audit evaluated execution invariants, race conditions, memory leaks, error-handling safety nets, cross-platform compatibility (Windows vs. POSIX), and security boundaries.
+
+A total of **14 actionable findings** and **2 architectural observations** are documented across the platform, categorized into four severity tiers:
+- **Critical (2)**: High-impact failure modes causing permanently hanging browser requests or authorization bypasses.
+- **High (5)**: Data leakage in network traces, false-positive rollback in self-healing, security vulnerabilities, and unhandled exceptions that degrade test validity or cause reporting crashes.
+- **Medium (5)**: Unsafe code patching heuristics, configuration silently ignored, role-alternation breakdown in conversational AI, process crashes in interactive sessions, and concurrency race conditions.
+- **Low (2)**: Multi-process port tracking and Unix post-update lifecycle management.
+
+---
+
+## Findings Matrix
+
+| ID | Title | Module | Severity | Status |
+|:---|:---|:---|:---:|:---:|
+| **SEC-01** | SSRF / Authorization Bypass via Backslash Discrepancy | `src/loki/safety.py` | 🔴 **Critical** | Open |
+| **ENG-01** | Route Hanging via Invalid `continue_()` Post-`fetch()` | `src/loki/engine/api_chaos.py` | 🔴 **Critical** | Open |
+| **SEC-03** | Sensitive Credential & PII Leak in HAR Response Bodies | `src/loki/engine/scrubber.py` | 🟠 **High** | ✅ **Resolved** |
+| **REP-02** | False-Positive "Crash Reproduced" on Internal Script Errors in `repro_test.py` | `src/loki/engine/replayer.py` | 🟠 **High** | Open |
+| **CHA-01** | Persistent Offline Network Leak on Unhandled Exceptions | `src/loki/personas/network_tormentor.py` | 🟠 **High** | Open |
+| **SEC-02** | Arbitrary File Read / Directory Traversal in Source File Resolution | `src/loki/engine/healer.py` | 🟠 **High** | Open |
+| **REP-01** | Unhandled `TypeError` / `AttributeError` on Null or String Status | `src/loki/engine/html_reporter.py` | 🟠 **High** | Open |
+| **ENG-02** | `auth_fault_rate` and `api_chaos` Keys Silently Ignored from YAML | `src/loki/config.py` | 🟡 **Medium** | Open |
+| **CLI-02** | Orphan User Message on Model Failure Violating Chat Role Alternation | `src/loki/ai/chat.py` | 🟡 **Medium** | Open |
+| **HLA-01** | Source Code Corruption via Non-Unique Snippet & Fuzzy Misalignment | `src/loki/engine/healer.py` | 🟡 **Medium** | Open |
+| **CLI-01** | Chat REPL Termination on `SystemExit` / `typer.Exit` | `src/loki/ai/chat.py` | 🟡 **Medium** | Open |
+| **INF-01** | TOCTOU Race Condition & Untyped Worker PID Parsing | `src/loki/engine/infra_chaos.py` | 🟡 **Medium** | Open |
+| **UPD-01** | Outdated In-Memory Binary Persistence on Unix Post-Update | `src/loki/engine/updater.py` | 🟢 **Low** | Open |
+| **INF-02** | Partial Kill Masking & Single-Target Limitation on Shared Ports | `src/loki/engine/infra_chaos.py` | 🟢 **Low** | Open |
+
+---
+
+## Detailed Findings & Surgical Remediations
+
+### 🔴 Critical Severity
+
+#### SEC-01: SSRF / Authorization Bypass via Backslash Discrepancy
+- **File**: `src/loki/safety.py` (lines 17–22)
+- **Description**: Python's `urllib.parse.urlparse` treats backslashes (`\`) differently from modern web browsers and Playwright (Chromium). When a target URL contains a backslash (e.g., `http://evil.com\@localhost`), `urlparse` interprets `evil.com\` as the username/userinfo component and `localhost` as the hostname. Consequently, `is_local_host(url)` evaluates to `True`, bypassing the target authorization guardrail. However, Chromium normalizes `\` to `/`, navigating to `http://evil.com/@localhost` and subjecting an unauthorized external target to chaos attacks.
+- **Remediation**:
+  Normalize backslashes to forward slashes before parsing:
+  ```python
+  def extract_host(url: str) -> str:
+      sanitized = url.replace("\\", "/")
+      candidate = sanitized if "://" in sanitized else f"http://{sanitized}"
+      parsed = urlparse(candidate)
+      return (parsed.hostname or sanitized).strip().lower()
+  ```
+
+---
+
+#### ENG-01: Route Hanging via Invalid `continue_()` Post-`fetch()`
+- **File**: `src/loki/engine/api_chaos.py` (lines 367–368, 390–391, 446–447)
+- **Description**: In `ApiChaosEngine` (`_inject_corrupt_json`, `_inject_delay`, `_inject_schema_strip`), the interceptor first calls `response = route.fetch()` to retrieve the original API response from the server before mutating it. If an exception occurs after `route.fetch()`, the exception handler executes `route.continue_()`. 
+  Playwright explicitly prohibits invoking `continue_()` on a route where `fetch()` has already been issued—Playwright requires `route.fulfill()`. The invalid `continue_()` call throws an unhandled error inside the failsafe handler, leaving the HTTP request permanently hanging. This triggers artificial test timeouts and false-positive UI freeze reports.
+- **Remediation**:
+  Check if `response` was already fetched; if so, fulfill the route with the original response:
+  ```python
+  def _inject_corrupt_json(self, route: Route, request: Request) -> None:
+      response = None
+      try:
+          response = route.fetch()
+          # ... corruption logic ...
+          route.fulfill(...)
+      except Exception:
+          try:
+              if response is not None:
+                  route.fulfill(response=response)
+              else:
+                  route.continue_()
+          except Exception:
+              pass
+  ```
+
+---
+
+### 🟠 High Severity
+
+#### SEC-03: Sensitive Credential & PII Leak in HAR Response Bodies
+- **File**: `src/loki/engine/scrubber.py`
+- **Status**: ✅ **Resolved in v1.9.1 preparation**
+- **Description**: While `NetworkScrubber.scrub_har_data` redacted request URL query parameters, request headers/cookies, and request POST data, it previously omitted sanitizing the `response.content` block. As Playwright captures raw response bodies by default, API responses containing bearer tokens, passwords, session secrets, or personal data remained unredacted in `.loki/runs/<run_id>/network.har`.
+- **Remediation**:
+  Added `scrub_response_content()` and `scrub_raw_text()`, automatically parsing JSON response payloads (including lists and nested dictionaries), base64 encoded content, and raw text containing JWT tokens, Bearer strings, private keys, or API tokens.
+
+---
+
+#### REP-02: False-Positive "Crash Reproduced" on Internal Script Errors in `repro_test.py`
+- **File**: `src/loki/engine/replayer.py` (lines 51–58) / `src/loki/engine/healer.py` (lines 270–293)
+- **Description**: In `Replayer.run()`, `reproduced = result.returncode == 1`. In Python, any uncaught exception (such as Playwright `TimeoutError`, missing system dependencies, or syntax errors in synthesized code) causes the interpreter to exit with status code `1`.
+  Consequently, if `repro_test.py` fails due to an environmental or script execution error rather than detecting target web application errors, `CodeHealer.verify_fix()` falsely classifies the crash as "still reproduced" (`reproduced = True`). This causes `CodeHealer` to rollback perfectly valid patches and abort self-repair.
+- **Remediation**:
+  Differentiate between target web crash assertions and internal script execution failures. Have `repro_test.py` exit with a dedicated exit code (e.g., `42` for confirmed web error) or assert the presence of `"💥 [LOKI REPRO] CRASH SUCCESSFULLY REPRODUCED!"` in stdout:
+  ```python
+  crash_marker = "💥 [LOKI REPRO] CRASH SUCCESSFULLY REPRODUCED!"
+  reproduced = result.returncode == 1 and crash_marker in result.stdout
+  ```
+
+---
+
+#### CHA-01: Persistent Offline Network Leak on Unhandled Exceptions
+- **File**: `src/loki/personas/network_tormentor.py` (lines 160–168)
+- **Description**: In `NetworkTormentorPersona.attack()`, the persona disconnects the network via `page.context.set_offline(True)`. If an exception occurs while offline (e.g., Playwright `TargetClosedError`, element detachment, or navigation timeout), execution jumps straight to the `except Exception as e:` block and calls `continue` without restoring network connectivity. As a result, the remainder of the session (and subsequent Swarm personas) executes in a permanently offline state.
+- **Remediation**:
+  Ensure the network is reset in the exception handler:
+  ```python
+  except Exception as e:
+      self.log_action(f"Network assault cycle encountered: {str(e)[:40]}")
+      try:
+          self._reset_network(page)
+      except Exception:
+          pass
+      page.wait_for_timeout(500)
+  ```
+
+---
+
+#### SEC-02: Arbitrary File Read / Directory Traversal in Source File Resolution
+- **File**: `src/loki/engine/healer.py` (lines 34–44)
+- **Description**: In `resolve_source_file()`, filenames are extracted from crash logs using regex matching on common source code extensions (`.py`, `.js`, `.ts`, etc.). The matched path is checked only with `clean_path.is_file()`. If a crash log contains relative traversal sequences (e.g., `../../sensitive_config.py`), `CodeHealer` could read or attempt to patch files outside the active project root directory.
+- **Remediation**:
+  Enforce boundary containment relative to the project root:
+  ```python
+  clean_path = Path(candidate.strip("/\\"))
+  try:
+      resolved_target = clean_path.resolve()
+      if not resolved_target.is_relative_to(Path(".").resolve()):
+          continue
+  except Exception:
+      continue
+
+  if clean_path.is_file():
+      return clean_path
+  ```
+
+---
+
+#### REP-01: Unhandled `TypeError` / `AttributeError` on Null or String Status
+- **File**: `src/loki/engine/html_reporter.py` (lines 45, 148, 228)
+- **Description**:
+  1. Line 45: `st = r.get("status", "UNKNOWN")`. If the recorded incident dictionary has `"status": None`, `st` is `None`, and calling `.upper()` raises `AttributeError`.
+  2. Line 148: `if r.get("status", 0) < 400`. If `"status": None`, `None < 400` raises `TypeError`.
+  3. Line 228: `if status >= 500`. If synthetic fault telemetry records non-numeric status identifiers (e.g. `"MUTATED"` or `"CORRUPTED"`), comparing a string against an integer raises `TypeError`.
+- **Remediation**:
+  Apply defensive type-coalescing and exception-guarded integer casting.
+
+---
+
+### 🟡 Medium Severity
+
+#### ENG-02: `auth_fault_rate` and `api_chaos` Keys Silently Ignored from YAML
+- **File**: `src/loki/config.py` (lines 221–271) / `src/loki/engine/scanner.py` (line 66)
+- **Description**: `loki init` generates `.loki/config.yaml` specifying `auth_fault_rate: 0.4` under `api_chaos:`. However, `resolve_api_chaos_config()` never reads `auth_fault_rate`, nor does it map other valid `ApiChaosConfig` properties like `fault_types`, `delay_range_ms`, or `auth_fault_types`. Customizations authored by users in `config.yaml` are silently discarded.
+- **Remediation**:
+  Extract and pass all supported YAML parameters into `ApiChaosConfig`:
+  ```python
+  auth_fault_rate = float(yaml_cfg["auth_fault_rate"]) if "auth_fault_rate" in yaml_cfg else 0.4
+  fault_types = yaml_cfg.get("fault_types")
+  delay_range = tuple(yaml_cfg["delay_range_ms"]) if "delay_range_ms" in yaml_cfg else (1500, 3500)
+  ```
+
+---
+
+#### CLI-02: Orphan User Message on Model Failure Violating Chat Role Alternation
+- **File**: `src/loki/ai/chat.py` (lines 728–796)
+- **Description**: In multi-turn chat sessions, the user prompt is immediately appended to `self.history.append({"role": "user", "content": user_input})`. If LLM generation fails across all fallback attempts (`success == False`), no corresponding assistant turn is appended.
+  Consecutive queries append additional `user` messages, creating multiple consecutive `user` turns in `self.history`. Major AI providers (Anthropic, Gemini) reject requests that do not strictly alternate roles (`roles must alternate between "user" and "assistant"`), resulting in permanent session breakdown after a single API error.
+- **Remediation**:
+  Pop the orphan user turn if all generation attempts fail:
+  ```python
+  if not success:
+      if self.history and self.history[-1].get("role") == "user":
+          self.history.pop()
+  ```
+
+---
+
+#### HLA-01: Source Code Corruption via Non-Unique Snippet & Fuzzy Misalignment
+- **File**: `src/loki/engine/healer.py` (lines 215–239)
+- **Description**:
+  1. **Exact match ambiguity**: `apply_patch()` uses `norm_current.replace(norm_orig, norm_repl, 1)` without verifying that `norm_orig` is unique in the file. If the snippet appears in multiple locations, it blindly edits the first instance.
+  2. **Fuzzy match ambiguity & slicing defect**: In the line-by-line fallback, the algorithm breaks at the first match without checking for multiple occurrences. Furthermore, `orig_lines` filters out empty lines (`if line.strip()`), while sliding window comparison against `curr_lines` does not filter out empty lines in the source file, causing slice index offsets and corrupted replacements.
+- **Remediation**:
+  Enforce occurrence count check (`count == 1`) in both exact and fuzzy matching, and align source line slices accurately.
+
+---
+
+#### CLI-01: Chat REPL Termination on `SystemExit` / `typer.Exit`
+- **File**: `src/loki/ai/chat.py` (lines 295–302)
+- **Description**: In `_run_cli_action()`, the command dispatcher wraps invocations in `try ... except Exception as e:`. However, `SystemExit` (and `typer.Exit`) inherit directly from `BaseException`, not `Exception`. When commands such as `/run --ci` or validation checks call `sys.exit()` or raise `typer.Exit`, the interactive REPL catches nothing and abruptly terminates the entire user session.
+- **Remediation**:
+  Explicitly catch `(SystemExit, typer.Exit)` to preserve interactive REPL lifecycle.
+
+---
+
+#### INF-01: TOCTOU Race Condition & Untyped Worker PID Parsing
+- **File**: `src/loki/engine/infra_chaos.py` (lines 45–65)
+- **Description**:
+  1. Worker tracking in `_track_workers()` uses a non-atomic read-modify-write pattern on `.loki/infra_stress_workers.json`. Concurrent runs risk dropping PIDs, leaving orphaned burner processes.
+  2. `_read_tracked_workers()` parses JSON without type validation. If corrupted or non-integer values exist in the file, `cleanup_stress_workers()` throws `TypeError: pid must be an integer` when instantiating `psutil.Process(pid)`.
+- **Remediation**:
+  Validate integer types in `_read_tracked_workers()` (`[int(p) for p in data if str(p).isdigit()]`) and isolate process PID tracking.
+
+---
+
+### 🟢 Low Severity
+
+#### UPD-01: Outdated In-Memory Binary Persistence on Unix Post-Update
+- **File**: `src/loki/engine/updater.py` (lines 197–208)
+- **Description**: On Windows, `perform_update()` launches a detached PowerShell process and exits LOKI with `os._exit(0)` to prevent file locking. On Unix systems, `uv tool upgrade` successfully updates the binary on disk, but `perform_update()` returns `True` and keeps the current Python process running. The user continues interacting with the outdated in-memory module without realizing an exit is required.
+- **Remediation**:
+  Prompt the user or call `sys.exit(0)` after a confirmed upgrade on Unix.
+
+---
+
+#### INF-02: Partial Kill Masking & Single-Target Limitation on Shared Ports
+- **File**: `src/loki/engine/infra_chaos.py` (lines 174–175, 194)
+- **Description**:
+  1. In `kill_process()`, when targeting by `--port`, multiple processes may share the socket. If one process is killed but a subsequent process fails due to permissions, `kill_process()` returns `success=False` immediately, masking partial kills.
+  2. In `pause_process()`, only the first process (`procs[0]`) is paused, leaving sibling worker processes active and rendering the chaos attack incomplete.
+
+---
+
+## Architectural & Code Hygiene Observations
+
+1. **`knowledge.json` initialization timestamp** (`src/loki/engine/scanner.py:110`):
+   `knowledge.json` sets `"initialized_at": True` (a boolean) rather than an ISO-8601 timestamp string (`datetime.now(timezone.utc).isoformat()`).
+2. **`page.video` access order** (`src/loki/engine/sandbox.py:322`):
+   `video_obj = page.video` is accessed immediately after `page.close()`. While Chromium maintains the video reference until `context.close()`, reading `page.video` before closing the page ensures forward-compatibility with future Playwright releases.
