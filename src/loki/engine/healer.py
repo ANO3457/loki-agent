@@ -280,8 +280,18 @@ Do NOT output any markdown formatting or commentary outside the JSON.
                 "message": "✔ [HEALED] Reproduction test completed with 0 crashes. Bug successfully eliminated!",
                 "output": result.get("stdout"),
             }
+        elif not result.get("success"):
+            # The test harness or reproduction script failed to execute properly.
+            # Do NOT falsely rollback a valid fix due to harness or environment errors.
+            return {
+                "verified": False,
+                "rolled_back": False,
+                "error": True,
+                "message": f"⚠️ [REPLAY ERROR] Reproduction test could not run cleanly: {result.get('error')}",
+                "output": result.get("stderr") or result.get("stdout") or result.get("error"),
+            }
         else:
-            # Crash still persists! Perform automatic safety rollback
+            # Crash still persists in target application! Perform automatic safety rollback
             if backup_file and backup_file.exists() and target_file:
                 shutil.copy2(backup_file, target_file)
                 backup_file.unlink()

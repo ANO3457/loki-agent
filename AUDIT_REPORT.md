@@ -25,7 +25,7 @@ A total of **14 actionable findings** and **2 architectural observations** are d
 | **SEC-01** | SSRF / Authorization Bypass via Backslash Discrepancy | `src/loki/safety.py` | 🔴 **Critical** | ✅ **Resolved** |
 | **ENG-01** | Route Hanging via Invalid `continue_()` Post-`fetch()` | `src/loki/engine/api_chaos.py` | 🔴 **Critical** | ✅ **Resolved** |
 | **SEC-03** | Sensitive Credential & PII Leak in HAR Response Bodies | `src/loki/engine/scrubber.py` | 🟠 **High** | ✅ **Resolved** |
-| **REP-02** | False-Positive "Crash Reproduced" on Internal Script Errors in `repro_test.py` | `src/loki/engine/replayer.py` | 🟠 **High** | Open |
+| **REP-02** | False-Positive "Crash Reproduced" on Internal Script Errors in `repro_test.py` | `src/loki/engine/replayer.py` | 🟠 **High** | ✅ **Resolved** |
 | **CHA-01** | Persistent Offline Network Leak on Unhandled Exceptions | `src/loki/personas/network_tormentor.py` | 🟠 **High** | Open |
 | **SEC-02** | Arbitrary File Read / Directory Traversal in Source File Resolution | `src/loki/engine/healer.py` | 🟠 **High** | Open |
 | **REP-01** | Unhandled `TypeError` / `AttributeError` on Null or String Status | `src/loki/engine/html_reporter.py` | 🟠 **High** | Open |
@@ -97,15 +97,12 @@ A total of **14 actionable findings** and **2 architectural observations** are d
 ---
 
 #### REP-02: False-Positive "Crash Reproduced" on Internal Script Errors in `repro_test.py`
-- **File**: `src/loki/engine/replayer.py` (lines 51–58) / `src/loki/engine/healer.py` (lines 270–293)
+- **File**: `src/loki/engine/replayer.py` (lines 31–88) / `src/loki/engine/healer.py` (lines 260–295) / `src/loki/engine/reporter.py`
+- **Status**: ✅ **Resolved in v1.9.1 preparation**
 - **Description**: In `Replayer.run()`, `reproduced = result.returncode == 1`. In Python, any uncaught exception (such as Playwright `TimeoutError`, missing system dependencies, or syntax errors in synthesized code) causes the interpreter to exit with status code `1`.
   Consequently, if `repro_test.py` fails due to an environmental or script execution error rather than detecting target web application errors, `CodeHealer.verify_fix()` falsely classifies the crash as "still reproduced" (`reproduced = True`). This causes `CodeHealer` to rollback perfectly valid patches and abort self-repair.
 - **Remediation**:
-  Differentiate between target web crash assertions and internal script execution failures. Have `repro_test.py` exit with a dedicated exit code (e.g., `42` for confirmed web error) or assert the presence of `"💥 [LOKI REPRO] CRASH SUCCESSFULLY REPRODUCED!"` in stdout:
-  ```python
-  crash_marker = "💥 [LOKI REPRO] CRASH SUCCESSFULLY REPRODUCED!"
-  reproduced = result.returncode == 1 and crash_marker in result.stdout
-  ```
+  Differentiate between target web crash assertions and internal script execution failures. Assert the presence of crash reproduction markers (`CRASH_REPRODUCED_MARKERS`) in stdout and wrap generated repro scripts in top-level error handlers exiting with code 2. In `CodeHealer.verify_fix()`, treat `not result.get("success")` as a harness failure (`rolled_back = False`), safely preserving valid code patches.
 
 ---
 

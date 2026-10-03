@@ -28,6 +28,12 @@ class IncidentReplayer:
         run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
         return run_dirs[0]
 
+    CRASH_REPRODUCED_MARKERS = [
+        "[LOKI REPRO] CRASH SUCCESSFULLY REPRODUCED",
+        "[LOKI REPRO] RACE CONDITION REPRODUCED",
+        "[LOKI REPRO] CRASH(ES) DETECTED",
+    ]
+
     def replay_test(self, run_dir: Path) -> Dict[str, Any]:
         """Executes the generated reproduction script for the incident."""
         repro_script = run_dir / "repro_test.py"
@@ -48,14 +54,42 @@ class IncidentReplayer:
                 env=env,
                 timeout=30,
             )
-            # repro_test.py exits with 1 when crash is reproduced, and 0 when no crashes
-            return {
-                "success": True,
-                "reproduced": result.returncode == 1,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "returncode": result.returncode,
-            }
+            stdout = result.stdout or ""
+            stderr = result.stderr or ""
+
+            # Check whether target application error was explicitly reproduced
+            has_crash_marker = any(marker in stdout for marker in self.CRASH_REPRODUCED_MARKERS)
+
+            if result.returncode == 0:
+                # Script ran cleanly and detected 0 crashes (bug resolved)
+                return {
+                    "success": True,
+                    "reproduced": False,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "returncode": result.returncode,
+                }
+            elif has_crash_marker:
+                # Script executed and successfully confirmed target crash reproduction
+                return {
+                    "success": True,
+                    "reproduced": True,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "returncode": result.returncode,
+                }
+            else:
+                # Script exited with non-zero code, but did NOT confirm crash reproduction.
+                # This indicates an unhandled runtime exception, syntax error, or environment issue.
+                err_detail = stderr.strip() or stdout.strip() or f"Script exited with status code {result.returncode}"
+                return {
+                    "success": False,
+                    "reproduced": False,
+                    "error": f"Reproduction script encountered an execution error: {err_detail}",
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "returncode": result.returncode,
+                }
         except subprocess.TimeoutExpired:
             return {"success": False, "error": "Replay execution timed out after 30 seconds."}
         except Exception as e:
